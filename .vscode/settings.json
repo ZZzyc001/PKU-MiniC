@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.hcl": "haskell",
+        "string": "cpp"
+    }
+}
