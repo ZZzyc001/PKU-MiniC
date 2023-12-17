@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "*.hcl": "haskell",
-        "string": "cpp"
+        "string": "cpp",
+        "vector": "cpp",
+        "memory": "cpp"
     }
 }

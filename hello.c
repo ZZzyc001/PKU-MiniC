@@ -1,4 +1,7 @@
 int main() {
     // 忽略我的存在
-    return 0;
+    /*
+        这些也要忽略
+    */
+    return 3;
 }

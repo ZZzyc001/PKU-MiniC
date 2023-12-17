@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -36,5 +37,27 @@ int main(int argc, const char * argv[]) {
     // 输出解析得到的 AST, 其实就是个字符串
     ast->Dump();
     cout << endl;
+
+    unique_ptr<CompUnitAST> comp(dynamic_cast<CompUnitAST *>(ast.release()));
+    koopa_raw_program_t     krp = comp->to_koopa_raw_program();
+
+    koopa_program_t    kp;
+    koopa_error_code_t eno = koopa_generate_raw_to_koopa(&krp, &kp);
+    if (eno != KOOPA_EC_SUCCESS) {
+        std::cout << "generate raw to koopa error: " << (int) eno << std::endl;
+        return 0;
+    }
+    char * buffer = new char[1001];
+    size_t sz     = 1000;
+    eno           = koopa_dump_to_string(kp, buffer, &sz);
+    if (eno != KOOPA_EC_SUCCESS) {
+        std::cout << "dump to string error: " << (int) eno << std::endl;
+        return 0;
+    }
+    std::cout << buffer << std::endl;
+
+    ofstream yyout(output);
+    yyout << buffer;
+
     return 0;
 }
