@@ -6,6 +6,7 @@
 #include <string>
 
 #include "ast.h"
+#include "koopa_riscv.h"
 
 using namespace std;
 
@@ -35,29 +36,48 @@ int main(int argc, const char * argv[]) {
     assert(! ret);
 
     // 输出解析得到的 AST, 其实就是个字符串
+    std::cout << "AST:" << std::endl
+              << std::endl;
     ast->Dump();
     cout << endl;
 
     unique_ptr<CompUnitAST> comp(dynamic_cast<CompUnitAST *>(ast.release()));
     koopa_raw_program_t     krp = comp->to_koopa_raw_program();
 
-    koopa_program_t    kp;
-    koopa_error_code_t eno = koopa_generate_raw_to_koopa(&krp, &kp);
-    if (eno != KOOPA_EC_SUCCESS) {
-        std::cout << "generate raw to koopa error: " << (int) eno << std::endl;
-        return 0;
-    }
-    char * buffer = new char[1001];
-    size_t sz     = 1000;
-    eno           = koopa_dump_to_string(kp, buffer, &sz);
-    if (eno != KOOPA_EC_SUCCESS) {
-        std::cout << "dump to string error: " << (int) eno << std::endl;
-        return 0;
-    }
-    std::cout << buffer << std::endl;
+    if (mode == string("-koopa")) {
+        koopa_program_t    kp;
+        koopa_error_code_t eno = koopa_generate_raw_to_koopa(&krp, &kp);
+        if (eno != KOOPA_EC_SUCCESS) {
+            std::cout << "generate raw to koopa error: " << (int) eno << std::endl;
+            return 0;
+        }
 
-    ofstream yyout(output);
-    yyout << buffer;
+        char * buffer = new char[1001];
+        size_t sz     = 1000;
+        eno           = koopa_dump_to_string(kp, buffer, &sz);
+        if (eno != KOOPA_EC_SUCCESS) {
+            std::cout << "dump to string error: " << (int) eno << std::endl;
+            return 0;
+        }
+        std::cout << "koopa:" << std::endl
+                  << std::endl
+                  << buffer;
+
+        ofstream yyout(output);
+        yyout << buffer;
+        yyout.close();
+    }
+
+    if (mode == string("-riscv")) {
+        std::string str_riscv = gen_riscv_from_koopa_raw_program(krp);
+        std::cout << "riscv:" << std::endl
+                  << std::endl
+                  << str_riscv;
+
+        std::ofstream yyout(output);
+        yyout << str_riscv;
+        yyout.close();
+    }
 
     return 0;
 }
