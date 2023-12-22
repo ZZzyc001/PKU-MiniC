@@ -9,9 +9,12 @@ class BaseAST {
 public:
     virtual ~BaseAST() = default;
 
-    virtual void Dump() const = 0;
+    virtual void Dump() const {}
 
-    virtual void * to_koopa_item() const = 0;
+    virtual void * to_koopa_item() const {
+        std::cout << "Run into ERROR\n";
+        return nullptr;
+    }
 };
 
 // CompUnit 是 BaseAST
@@ -92,10 +95,18 @@ public:
     }
 };
 
+class ValueBaseAST : public BaseAST {
+public:
+    virtual void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const {
+        std::cout << "Run into ERROR\n";
+        return nullptr;
+    }
+};
+
 // Block
 class BlockAST : public BaseAST {
 public:
-    std::unique_ptr<BaseAST> stmt;
+    std::unique_ptr<ValueBaseAST> stmt;
 
     void Dump() const override {
         std::cout << "BlockAST { ";
@@ -107,7 +118,9 @@ public:
         koopa_raw_basic_block_data_t * res = new koopa_raw_basic_block_data_t();
 
         std::vector<const void *> stmts;
-        stmts.push_back(stmt->to_koopa_item());
+        koopa_raw_slice_t         node = empty_koopa_rs();
+        stmt->build_value_ast(stmts, node);
+
         res->insts = make_koopa_rs_from_vector(stmts, KOOPA_RSIK_VALUE);
 
         res->name    = "%entry";
@@ -119,33 +132,128 @@ public:
 };
 
 // Stmt
-class StmtAST : public BaseAST {
+class StmtAST : public ValueBaseAST {
 public:
-    int number;
+    std::unique_ptr<ValueBaseAST> exp;
 
     void Dump() const override {
         std::cout << "StmtAST { ";
-        std::cout << number;
+        exp->Dump();
         std::cout << " }";
     }
 
-    void * to_koopa_item() const override {
-        koopa_raw_value_data * res = new koopa_raw_value_data();
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        koopa_raw_value_data * res  = new koopa_raw_value_data();
+        koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
 
-        koopa_raw_value_data * ret   = new koopa_raw_value_data();
-        ret->kind.tag                = KOOPA_RVT_INTEGER;
-        ret->kind.data.integer.value = number;
-        ret->name                    = nullptr;
-        ret->ty                      = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
-        ret->used_by                 = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        res->kind.tag = KOOPA_RVT_RETURN;
 
-        res->kind.tag            = KOOPA_RVT_RETURN;
-        res->kind.data.ret.value = ret;
+        res->kind.data.ret.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
 
         res->ty      = simple_koopa_raw_type_kind(KOOPA_RTT_UNIT);
         res->name    = nullptr;
         res->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+
+        buf.push_back(res);
         return res;
+    }
+};
+
+class ExpAST : public ValueBaseAST {
+public:
+    std::unique_ptr<ValueBaseAST> unary_exp;
+
+    void Dump() const override {
+        std::cout << "ExpAST { ";
+        unary_exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        return unary_exp->build_value_ast(buf, parent);
+    }
+};
+
+class PrimaryExpAST : public ValueBaseAST {
+public:
+    enum class PrimaryExpType {
+        Exp,
+        Number
+    } type;
+    std::unique_ptr<ValueBaseAST> exp;
+    int                           number;
+
+    void Dump() const override {
+        std::cout << "PrimaryExpAST { ";
+        if (type == PrimaryExpType::Exp)
+            exp->Dump();
+        else
+            std::cout << number;
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == PrimaryExpType::Exp)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res   = new koopa_raw_value_data();
+            res->kind.tag                = KOOPA_RVT_INTEGER;
+            res->kind.data.integer.value = number;
+            res->name                    = nullptr;
+            res->ty                      = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->used_by                 = parent;
+            return res;
+        }
+    }
+};
+
+class UnaryExpAST : public ValueBaseAST {
+public:
+    enum class UnaryExpType {
+        PrimaryExp,
+        UnaryExp
+    } type;
+    std::string                   op;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "UnaryExpAST { ";
+        if (type == UnaryExpType::UnaryExp)
+            std::cout << op << ' ';
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == UnaryExpType::PrimaryExp || (type == UnaryExpType::UnaryExp && op == "+"))
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            koopa_raw_value_data * zero   = new koopa_raw_value_data();
+            zero->kind.tag                = KOOPA_RVT_INTEGER;
+            zero->kind.data.integer.value = 0;
+            zero->name                    = nullptr;
+            zero->ty                      = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            zero->used_by                 = node;
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            if (op == "-")
+                binary.op = KOOPA_RBO_SUB;
+            else if (op == "!")
+                binary.op = KOOPA_RBO_EQ;
+
+            binary.lhs = (koopa_raw_value_t) zero;
+            binary.rhs = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+
+            buf.push_back(res);
+            return res;
+        }
     }
 };
 

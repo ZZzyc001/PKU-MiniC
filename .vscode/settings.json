@@ -45,6 +45,8 @@
         "streambuf": "cpp",
         "system_error": "cpp",
         "xfacet": "cpp",
-        "xlocinfo": "cpp"
+        "xlocinfo": "cpp",
+        "map": "cpp",
+        "xtree": "cpp"
     }
 }

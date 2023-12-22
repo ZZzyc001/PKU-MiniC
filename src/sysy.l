@@ -20,6 +20,9 @@ WhiteSpace    [ \t\n\r]*
 LineComment   "//".*
 MultiLineComment \/\*([^*]|(\*+[^*/]))*\*+\/
 
+/* 运算符 */
+Operator \+|\-|\!
+
 /* 标识符 */
 Identifier    [a-zA-Z_][a-zA-Z0-9_]*
 
@@ -36,6 +39,8 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 
 "int"           { return INT; }
 "return"        { return RETURN; }
+
+{Operator}      { yylval.str_val = new string(yytext); return UNARYOP; }
 
 {Identifier}    { yylval.str_val = new string(yytext); return IDENT; }
 
