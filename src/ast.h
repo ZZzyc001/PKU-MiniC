@@ -161,16 +161,16 @@ public:
 
 class ExpAST : public ValueBaseAST {
 public:
-    std::unique_ptr<ValueBaseAST> unary_exp;
+    std::unique_ptr<ValueBaseAST> exp;
 
     void Dump() const override {
         std::cout << "ExpAST { ";
-        unary_exp->Dump();
+        exp->Dump();
         std::cout << " }";
     }
 
     void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
-        return unary_exp->build_value_ast(buf, parent);
+        return exp->build_value_ast(buf, parent);
     }
 };
 
@@ -249,6 +249,102 @@ public:
                 binary.op = KOOPA_RBO_EQ;
 
             binary.lhs = (koopa_raw_value_t) zero;
+            binary.rhs = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+
+            buf.push_back(res);
+            return res;
+        }
+    }
+};
+
+class MulExpAST : public ValueBaseAST {
+public:
+    enum class MulExpType {
+        Unary,
+        Binary
+    } type;
+    std::string op;
+
+    std::unique_ptr<ValueBaseAST> left_exp;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "MulExpAST { ";
+        if (type == MulExpType::Binary) {
+            left_exp->Dump();
+            std::cout << op;
+        }
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == MulExpType::Unary)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            if (op == "*")
+                binary.op = KOOPA_RBO_MUL;
+            else if (op == "/")
+                binary.op = KOOPA_RBO_DIV;
+            else if (op == "%")
+                binary.op = KOOPA_RBO_MOD;
+
+            binary.lhs = (koopa_raw_value_t) left_exp->build_value_ast(buf, node);
+            binary.rhs = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+
+            buf.push_back(res);
+            return res;
+        }
+    }
+};
+
+class AddExpAST : public ValueBaseAST {
+public:
+    enum class AddExpType {
+        Unary,
+        Binary
+    } type;
+    std::string op;
+
+    std::unique_ptr<ValueBaseAST> left_exp;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "AddExpAST { ";
+        if (type == AddExpType::Binary) {
+            left_exp->Dump();
+            std::cout << op;
+        }
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == AddExpType::Unary)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            if (op == "+")
+                binary.op = KOOPA_RBO_ADD;
+            else if (op == "-")
+                binary.op = KOOPA_RBO_SUB;
+
+            binary.lhs = (koopa_raw_value_t) left_exp->build_value_ast(buf, node);
             binary.rhs = (koopa_raw_value_t) exp->build_value_ast(buf, node);
 
             buf.push_back(res);

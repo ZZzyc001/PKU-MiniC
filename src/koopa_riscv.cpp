@@ -77,7 +77,6 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
         res += std::to_string(kind.data.integer.value);
         res += "\n";
         buf[value] = s;
-        // ++s;
         break;
     case KOOPA_RVT_BINARY: {
         auto &      binary = kind.data.binary;
@@ -96,6 +95,8 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
             if (binary.rhs->kind.tag == KOOPA_RVT_INTEGER && binary.rhs->kind.data.integer.value == 0)
                 rhs = "x0";
             else {
+                if (binary.lhs->kind.tag == KOOPA_RVT_INTEGER && binary.lhs->kind.data.integer.value != 0)
+                    ++s;
                 Visit(binary.rhs, res, s, buf);
                 rhs = "t" + std::to_string(buf[binary.rhs]);
             }
@@ -104,10 +105,21 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
 
         if (binary.op == KOOPA_RBO_SUB)
             res += "sub t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_ADD)
+            res += "add t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_SUB)
+            res += "sub t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_MUL)
+            res += "mul t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_DIV)
+            res += "div t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_MOD)
+            res += "mod t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
         else if (binary.op == KOOPA_RBO_EQ) {
             res += "xor t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
             res += "seqz t" + std::to_string(s) + ", t" + std::to_string(s) + "\n";
         }
+
         buf[value] = s;
         ++s;
         break;
