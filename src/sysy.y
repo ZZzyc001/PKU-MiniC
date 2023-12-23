@@ -36,13 +36,13 @@ using namespace std;
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
 %token INT RETURN
-%token <str_val> IDENT UNARYOP MULOP ADDOP
+%token <str_val> IDENT UNARYOP MULOP ADDOP RELOP EQOP LANDOP LOROP
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
 %type <ast_val> FuncDef FuncType Block
-%type <value_ast_val> Stmt Exp PrimaryExp UnaryExp MulExp AddExp
-%type <int_val> Number
+%type <value_ast_val> Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp
+%type <int_val> Number 
 
 %%
 
@@ -98,7 +98,7 @@ Stmt
   ;
 
 Exp
-  : AddExp {
+  : LOrExp {
     auto ast = new ExpAST();
     ast -> exp = unique_ptr<ValueBaseAST>($1);
     $$ = ast;
@@ -164,11 +164,75 @@ AddExp
     auto ast = new AddExpAST();
     ast -> type = AddExpAST::AddExpType::Unary;
     ast -> exp = unique_ptr<ValueBaseAST>($1);
-  $$ = ast;
+    $$ = ast;
   }
   | AddExp ADDOP MulExp {
     auto ast = new AddExpAST();
     ast -> type = AddExpAST::AddExpType::Binary;
+    ast -> op = *unique_ptr<string>($2);
+    ast -> left_exp = unique_ptr<ValueBaseAST>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    $$ = ast;
+  };
+
+RelExp
+  : AddExp {
+    auto ast = new RelExpAST();
+    ast -> type = RelExpAST::RelExpType::Unary;
+    ast -> exp = unique_ptr<ValueBaseAST>($1);
+    $$ = ast;
+  }
+  | RelExp RELOP AddExp {
+    auto ast = new RelExpAST();
+    ast -> type = RelExpAST::RelExpType::Binary;
+    ast -> op = *unique_ptr<string>($2);
+    ast -> left_exp = unique_ptr<ValueBaseAST>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    $$ = ast;
+  };
+
+EqExp
+  : RelExp {
+    auto ast = new EqExpAST();
+    ast -> type = EqExpAST::EqExpType::Unary;
+    ast -> exp = unique_ptr<ValueBaseAST>($1);
+    $$ = ast;
+  }
+  | EqExp EQOP RelExp {
+    auto ast = new EqExpAST();
+    ast -> type = EqExpAST::EqExpType::Binary;
+    ast -> op = *unique_ptr<string>($2);
+    ast -> left_exp = unique_ptr<ValueBaseAST>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    $$ = ast;
+  };
+
+LAndExp
+  : EqExp {
+    auto ast = new LAndExpAST();
+    ast -> type = LAndExpAST::LAndExpType::Unary;
+    ast -> exp = unique_ptr<ValueBaseAST>($1);
+    $$ = ast;
+  }
+  | LAndExp LANDOP EqExp {
+    auto ast = new LAndExpAST();
+    ast -> type = LAndExpAST::LAndExpType::Binary;
+    ast -> op = *unique_ptr<string>($2);
+    ast -> left_exp = unique_ptr<ValueBaseAST>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    $$ = ast;
+  };
+
+LOrExp
+  : LAndExp {
+    auto ast = new LOrExpAST();
+    ast -> type = LOrExpAST::LOrExpType::Unary;
+    ast -> exp = unique_ptr<ValueBaseAST>($1);
+    $$ = ast;
+  }
+  | LOrExp LOROP LAndExp {
+    auto ast = new LOrExpAST();
+    ast -> type = LOrExpAST::LOrExpType::Binary;
     ast -> op = *unique_ptr<string>($2);
     ast -> left_exp = unique_ptr<ValueBaseAST>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);

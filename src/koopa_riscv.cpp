@@ -55,6 +55,13 @@ void Visit(const koopa_raw_basic_block_t & bb, std::string & res, int & s, std::
     Visit(bb->insts, res, s, buf);
 }
 
+std::string get_temp_register(int n) {
+    if (n < 7)
+        return "t" + std::to_string(n);
+    else
+        return "a" + std::to_string(n - 7);
+}
+
 void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map<const void *, int> & buf) {
     // 根据指令类型判断后续需要如何访问
     const auto & kind = value->kind;
@@ -62,7 +69,7 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
     case KOOPA_RVT_RETURN:
         // 访问 return 指令
         if (buf.find(kind.data.ret.value) != buf.end())
-            res += "mv a0, t" + std::to_string(buf[kind.data.ret.value]) + "\n";
+            res += "mv a0, " + get_temp_register(buf[kind.data.ret.value]) + "\n";
         else if (kind.data.ret.value->kind.tag == KOOPA_RVT_INTEGER)
             res += "li a0, " + std::to_string(kind.data.ret.value->kind.data.integer.value) + "\n";
         else
@@ -73,7 +80,7 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
         break;
     case KOOPA_RVT_INTEGER:
         // 访问 integer 指令
-        res += "li t" + std::to_string(s) + ", ";
+        res += "li " + get_temp_register(s) + ", ";
         res += std::to_string(kind.data.integer.value);
         res += "\n";
         buf[value] = s;
@@ -86,10 +93,10 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
                 lhs = "x0";
             else {
                 Visit(binary.lhs, res, s, buf);
-                lhs = "t" + std::to_string(buf[binary.lhs]);
+                lhs = get_temp_register(buf[binary.lhs]);
             }
         else
-            lhs = "t" + std::to_string(buf[binary.lhs]);
+            lhs = get_temp_register(buf[binary.lhs]);
 
         if (buf.find(binary.rhs) == buf.end())
             if (binary.rhs->kind.tag == KOOPA_RVT_INTEGER && binary.rhs->kind.data.integer.value == 0)
@@ -98,26 +105,43 @@ void Visit(const koopa_raw_value_t & value, std::string & res, int & s, std::map
                 if (binary.lhs->kind.tag == KOOPA_RVT_INTEGER && binary.lhs->kind.data.integer.value != 0)
                     ++s;
                 Visit(binary.rhs, res, s, buf);
-                rhs = "t" + std::to_string(buf[binary.rhs]);
+                rhs = get_temp_register(buf[binary.rhs]);
             }
         else
-            rhs = "t" + std::to_string(buf[binary.rhs]);
+            rhs = get_temp_register(buf[binary.rhs]);
+
+        std::string result = get_temp_register(s);
 
         if (binary.op == KOOPA_RBO_SUB)
-            res += "sub t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+            res += "sub " + result + ", " + lhs + ", " + rhs + "\n";
         else if (binary.op == KOOPA_RBO_ADD)
-            res += "add t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+            res += "add " + result + ", " + lhs + ", " + rhs + "\n";
         else if (binary.op == KOOPA_RBO_SUB)
-            res += "sub t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+            res += "sub " + result + ", " + lhs + ", " + rhs + "\n";
         else if (binary.op == KOOPA_RBO_MUL)
-            res += "mul t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+            res += "mul " + result + ", " + lhs + ", " + rhs + "\n";
         else if (binary.op == KOOPA_RBO_DIV)
-            res += "div t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
+            res += "div " + result + ", " + lhs + ", " + rhs + "\n";
         else if (binary.op == KOOPA_RBO_MOD)
-            res += "mod t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
-        else if (binary.op == KOOPA_RBO_EQ) {
-            res += "xor t" + std::to_string(s) + ", " + lhs + ", " + rhs + "\n";
-            res += "seqz t" + std::to_string(s) + ", t" + std::to_string(s) + "\n";
+            res += "rem " + result + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_LT)
+            res += "slt " + result + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_LE)
+            res += "sgt " + result + ", " + rhs + ", " + lhs + "\n";
+        else if (binary.op == KOOPA_RBO_GT)
+            res += "sgt " + result + ", " + lhs + ", " + rhs + "\n";
+        else if (binary.op == KOOPA_RBO_GE)
+            res += "slt " + result + ", " + rhs + ", " + lhs + "\n";
+        else if (binary.op == KOOPA_RBO_AND)
+            res += "and " + result + ", " + rhs + ", " + lhs + "\n";
+        else if (binary.op == KOOPA_RBO_OR)
+            res += "or " + result + ", " + rhs + ", " + lhs + "\n";
+        else if (binary.op == KOOPA_RBO_NOT_EQ) {
+            res += "xor " + result + ", " + lhs + ", " + rhs + "\n";
+            res += "snez " + result + ", " + result + "\n";
+        } else if (binary.op == KOOPA_RBO_EQ) {
+            res += "xor " + result + ", " + lhs + ", " + rhs + "\n";
+            res += "seqz " + result + ", " + result + "\n";
         }
 
         buf[value] = s;

@@ -353,6 +353,238 @@ public:
     }
 };
 
+class RelExpAST : public ValueBaseAST {
+public:
+    enum class RelExpType {
+        Unary,
+        Binary
+    } type;
+    std::string op;
+
+    std::unique_ptr<ValueBaseAST> left_exp;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "RelExpAST { ";
+        if (type == RelExpType::Binary) {
+            left_exp->Dump();
+            std::cout << op;
+        }
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == RelExpType::Unary)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            if (op == "<")
+                binary.op = KOOPA_RBO_LT;
+            else if (op == "<=")
+                binary.op = KOOPA_RBO_LE;
+            else if (op == ">")
+                binary.op = KOOPA_RBO_GT;
+            else if (op == ">=")
+                binary.op = KOOPA_RBO_GE;
+
+            binary.lhs = (koopa_raw_value_t) left_exp->build_value_ast(buf, node);
+            binary.rhs = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+
+            buf.push_back(res);
+            return res;
+        }
+    }
+};
+
+class EqExpAST : public ValueBaseAST {
+public:
+    enum class EqExpType {
+        Unary,
+        Binary
+    } type;
+    std::string op;
+
+    std::unique_ptr<ValueBaseAST> left_exp;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "EqExpAST { ";
+        if (type == EqExpType::Binary) {
+            left_exp->Dump();
+            std::cout << op;
+        }
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == EqExpType::Unary)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            if (op == "==")
+                binary.op = KOOPA_RBO_EQ;
+            else if (op == "!=")
+                binary.op = KOOPA_RBO_NOT_EQ;
+
+            binary.lhs = (koopa_raw_value_t) left_exp->build_value_ast(buf, node);
+            binary.rhs = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+
+            buf.push_back(res);
+            return res;
+        }
+    }
+};
+
+class LAndExpAST : public ValueBaseAST {
+    void * to_bool_koopa(std::vector<const void *> & buf, const koopa_raw_slice_t & parent, koopa_raw_value_t exp) const {
+        koopa_raw_value_data * res  = new koopa_raw_value_data();
+        koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+        koopa_raw_value_data * zero   = new koopa_raw_value_data();
+        zero->kind.tag                = KOOPA_RVT_INTEGER;
+        zero->kind.data.integer.value = 0;
+        zero->name                    = nullptr;
+        zero->ty                      = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        zero->used_by                 = node;
+
+        res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        res->name     = nullptr;
+        res->used_by  = parent;
+        res->kind.tag = KOOPA_RVT_BINARY;
+        auto & binary = res->kind.data.binary;
+        binary.op     = KOOPA_RBO_NOT_EQ;
+        binary.lhs    = exp;
+        binary.rhs    = zero;
+        buf.push_back(res);
+        return res;
+    }
+
+public:
+    enum class LAndExpType {
+        Unary,
+        Binary
+    } type;
+    std::string op;
+
+    std::unique_ptr<ValueBaseAST> left_exp;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "LAndExpAST { ";
+        if (type == LAndExpType::Binary) {
+            left_exp->Dump();
+            std::cout << op;
+        }
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == LAndExpType::Unary)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            binary.op     = KOOPA_RBO_AND;
+
+            binary.lhs = (koopa_raw_value_t) to_bool_koopa(buf, node, (koopa_raw_value_t) left_exp->build_value_ast(buf, node));
+            binary.rhs = (koopa_raw_value_t) to_bool_koopa(buf, node, (koopa_raw_value_t) exp->build_value_ast(buf, node));
+
+            buf.push_back(res);
+            return res;
+        }
+    }
+};
+
+class LOrExpAST : public ValueBaseAST {
+    void * to_bool_koopa(std::vector<const void *> & buf, const koopa_raw_slice_t & parent, koopa_raw_value_t exp) const {
+        koopa_raw_value_data * res  = new koopa_raw_value_data();
+        koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+        koopa_raw_value_data * zero   = new koopa_raw_value_data();
+        zero->kind.tag                = KOOPA_RVT_INTEGER;
+        zero->kind.data.integer.value = 0;
+        zero->name                    = nullptr;
+        zero->ty                      = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        zero->used_by                 = node;
+
+        res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        res->name     = nullptr;
+        res->used_by  = parent;
+        res->kind.tag = KOOPA_RVT_BINARY;
+        auto & binary = res->kind.data.binary;
+        binary.op     = KOOPA_RBO_NOT_EQ;
+        binary.lhs    = exp;
+        binary.rhs    = zero;
+        buf.push_back(res);
+        return res;
+    }
+
+public:
+    enum class LOrExpType {
+        Unary,
+        Binary
+    } type;
+    std::string op;
+
+    std::unique_ptr<ValueBaseAST> left_exp;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "LOrExpAST { ";
+        if (type == LOrExpType::Binary) {
+            left_exp->Dump();
+            std::cout << op;
+        }
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        if (type == LOrExpType::Unary)
+            return exp->build_value_ast(buf, parent);
+        else {
+            koopa_raw_value_data * res  = new koopa_raw_value_data();
+            koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+            res->ty       = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name     = nullptr;
+            res->used_by  = parent;
+            res->kind.tag = KOOPA_RVT_BINARY;
+            auto & binary = res->kind.data.binary;
+            binary.op     = KOOPA_RBO_OR;
+
+            binary.lhs = (koopa_raw_value_t) to_bool_koopa(buf, node, (koopa_raw_value_t) left_exp->build_value_ast(buf, node));
+            binary.rhs = (koopa_raw_value_t) to_bool_koopa(buf, node, (koopa_raw_value_t) exp->build_value_ast(buf, node));
+
+            buf.push_back(res);
+            return res;
+        }
+    }
+};
+
 // // Number
 // class NumberAST : public BaseAST {
 //     public:

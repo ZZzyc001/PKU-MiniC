@@ -24,6 +24,10 @@ MultiLineComment \/\*([^*]|(\*+[^*/]))*\*+\/
 UnaryOperator \!
 AddOperator   \+|\-
 MulOperator   \*|\/|\%
+RelOperator   <|>|<=|>=
+EqOperator    ==|\!=
+LAndOperator  &&
+LOrOperator   \|\|
 
 /* 标识符 */
 Identifier    [a-zA-Z_][a-zA-Z0-9_]*
@@ -45,6 +49,10 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 {UnaryOperator}      { yylval.str_val = new string(yytext); return UNARYOP; }
 {AddOperator}      { yylval.str_val = new string(yytext); return ADDOP; }
 {MulOperator}      { yylval.str_val = new string(yytext); return MULOP; }
+{RelOperator}      { yylval.str_val = new string(yytext); return RELOP; }
+{EqOperator}      { yylval.str_val = new string(yytext); return EQOP; }
+{LAndOperator}      { yylval.str_val = new string(yytext); return LANDOP; }
+{LOrOperator}      { yylval.str_val = new string(yytext); return LOROP; }
 
 {Identifier}    { yylval.str_val = new string(yytext); return IDENT; }
 
