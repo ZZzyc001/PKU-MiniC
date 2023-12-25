@@ -45,6 +45,7 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 
 "int"           { return INT; }
 "return"        { return RETURN; }
+"const"         { return CONST; }
 
 {UnaryOperator}      { yylval.str_val = new string(yytext); return UNARYOP; }
 {AddOperator}      { yylval.str_val = new string(yytext); return ADDOP; }

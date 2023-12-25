@@ -1,7 +1,4 @@
-.text
-.globl main
-main:
-xor t0, x0, x0
-seqz t0, t0
-mv a0, t0
-ret
+fun @main(): i32 {
+%entry:
+  ret 2
+}

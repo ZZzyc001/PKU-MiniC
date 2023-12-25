@@ -1,12 +1,18 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
+#include <vector>
 
 #include "koopa_util.h"
+
+#include "symbol_list.h"
 
 // 所有 AST 的基类
 class BaseAST {
 public:
+    static SymbolList symbol_list;
+
     virtual ~BaseAST() = default;
 
     virtual void Dump() const {}
@@ -101,31 +107,43 @@ public:
         std::cout << "Run into ERROR\n";
         return nullptr;
     }
+
+    virtual int get_value() const {
+        std::cout << "Run into ERROR\n";
+        return 0;
+    }
 };
 
 // Block
 class BlockAST : public BaseAST {
 public:
-    std::unique_ptr<ValueBaseAST> stmt;
+    std::vector<std::unique_ptr<ValueBaseAST>> insts;
 
     void Dump() const override {
         std::cout << "BlockAST { ";
-        stmt->Dump();
+        for (const auto & it : insts)
+            it->Dump();
         std::cout << " }";
     }
 
     void * to_koopa_item() const override {
+        symbol_list.newEnv();
+
         koopa_raw_basic_block_data_t * res = new koopa_raw_basic_block_data_t();
 
         std::vector<const void *> stmts;
         koopa_raw_slice_t         node = empty_koopa_rs();
-        stmt->build_value_ast(stmts, node);
+
+        for (const auto & it : insts)
+            it->build_value_ast(stmts, node);
 
         res->insts = make_koopa_rs_from_vector(stmts, KOOPA_RSIK_VALUE);
 
         res->name    = "%entry";
         res->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
         res->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+
+        symbol_list.deleteEnv();
 
         return res;
     }
@@ -157,6 +175,10 @@ public:
         buf.push_back(res);
         return res;
     }
+
+    int get_value() const override {
+        return exp->get_value();
+    }
 };
 
 class ExpAST : public ValueBaseAST {
@@ -171,6 +193,10 @@ public:
 
     void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
         return exp->build_value_ast(buf, parent);
+    }
+
+    int get_value() const override {
+        return exp->get_value();
     }
 };
 
@@ -204,6 +230,12 @@ public:
             res->used_by                 = parent;
             return res;
         }
+    }
+
+    int get_value() const override {
+        if (type == PrimaryExpType::Exp)
+            return exp->get_value();
+        return number;
     }
 };
 
@@ -255,6 +287,15 @@ public:
             return res;
         }
     }
+
+    int get_value() const override {
+        if (type == UnaryExpType::PrimaryExp || (type == UnaryExpType::UnaryExp && op == "+"))
+            return exp->get_value();
+        else if (op == "-")
+            return -exp->get_value();
+        else
+            return ! exp->get_value();
+    }
 };
 
 class MulExpAST : public ValueBaseAST {
@@ -304,6 +345,17 @@ public:
             return res;
         }
     }
+
+    int get_value() const override {
+        if (type == MulExpType::Unary)
+            return exp->get_value();
+        else if (op == "*")
+            return left_exp->get_value() * exp->get_value();
+        else if (op == "/")
+            return left_exp->get_value() / exp->get_value();
+        else
+            return left_exp->get_value() % exp->get_value();
+    }
 };
 
 class AddExpAST : public ValueBaseAST {
@@ -350,6 +402,15 @@ public:
             buf.push_back(res);
             return res;
         }
+    }
+
+    int get_value() const override {
+        if (type == AddExpType::Unary)
+            return exp->get_value();
+        else if (op == "+")
+            return left_exp->get_value() + exp->get_value();
+        else
+            return left_exp->get_value() - exp->get_value();
     }
 };
 
@@ -402,6 +463,19 @@ public:
             return res;
         }
     }
+
+    int get_value() const override {
+        if (type == RelExpType::Unary)
+            return exp->get_value();
+        else if (op == "<")
+            return left_exp->get_value() < exp->get_value();
+        else if (op == "<=")
+            return left_exp->get_value() <= exp->get_value();
+        else if (op == ">")
+            return left_exp->get_value() > exp->get_value();
+        else
+            return left_exp->get_value() >= exp->get_value();
+    }
 };
 
 class EqExpAST : public ValueBaseAST {
@@ -449,6 +523,15 @@ public:
             return res;
         }
     }
+
+    int get_value() const override {
+        if (type == EqExpType::Unary)
+            return exp->get_value();
+        else if (op == "==")
+            return left_exp->get_value() == exp->get_value();
+        else
+            return left_exp->get_value() != exp->get_value();
+    }
 };
 
 class LAndExpAST : public ValueBaseAST {
@@ -480,7 +563,6 @@ public:
         Unary,
         Binary
     } type;
-    std::string op;
 
     std::unique_ptr<ValueBaseAST> left_exp;
     std::unique_ptr<ValueBaseAST> exp;
@@ -489,7 +571,7 @@ public:
         std::cout << "LAndExpAST { ";
         if (type == LAndExpType::Binary) {
             left_exp->Dump();
-            std::cout << op;
+            std::cout << "&&";
         }
         exp->Dump();
         std::cout << " }";
@@ -515,6 +597,13 @@ public:
             buf.push_back(res);
             return res;
         }
+    }
+
+    int get_value() const override {
+        if (type == LAndExpType::Unary)
+            return exp->get_value();
+        else
+            return left_exp->get_value() && exp->get_value();
     }
 };
 
@@ -547,7 +636,6 @@ public:
         Unary,
         Binary
     } type;
-    std::string op;
 
     std::unique_ptr<ValueBaseAST> left_exp;
     std::unique_ptr<ValueBaseAST> exp;
@@ -556,7 +644,7 @@ public:
         std::cout << "LOrExpAST { ";
         if (type == LOrExpType::Binary) {
             left_exp->Dump();
-            std::cout << op;
+            std::cout << "||";
         }
         exp->Dump();
         std::cout << " }";
@@ -582,6 +670,65 @@ public:
             buf.push_back(res);
             return res;
         }
+    }
+
+    int get_value() const override {
+        if (type == LOrExpType::Unary)
+            return exp->get_value();
+        else
+            return left_exp->get_value() || exp->get_value();
+    }
+};
+
+class ConstDefAST : public ValueBaseAST {
+public:
+    std::string                   name;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "ConstDefAST { " << name;
+        std::cout << " = ";
+        exp->Dump();
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        koopa_raw_value_data * res = new koopa_raw_value_data();
+
+        res->ty                      = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        res->name                    = nullptr;
+        res->used_by                 = parent;
+        res->kind.tag                = KOOPA_RVT_INTEGER;
+        res->kind.data.integer.value = exp->get_value();
+
+        symbol_list.addSymbol(name, res);
+        return res;
+    }
+
+    int get_value() const override {
+        return exp->get_value();
+    }
+};
+
+class LValAST : public ValueBaseAST {
+public:
+    std::string name;
+
+    void Dump() const override {
+        std::cout << "LValAST { " << name;
+        std::cout << " }";
+    }
+
+    void * to_koopa_item() const override {
+        return symbol_list.getSymbol(name);
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        return to_koopa_item();
+    }
+
+    int get_value() const override {
+        return ((koopa_raw_value_data *) to_koopa_item())->kind.data.integer.value;
     }
 };
 

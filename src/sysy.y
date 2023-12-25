@@ -9,8 +9,17 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <vector>
+#include <map>
 
 #include "ast.h"
+
+std::vector<std::vector<std::unique_ptr<ValueBaseAST>>> env_stk;
+
+void add_inst(ValueBaseAST * ast)
+{
+  env_stk.rbegin()->push_back(std::unique_ptr<ValueBaseAST>(ast));
+}
 
 // 声明 lexer 函数和错误处理函数
 int yylex();
@@ -35,13 +44,13 @@ using namespace std;
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
-%token INT RETURN
+%token INT RETURN CONST
 %token <str_val> IDENT UNARYOP MULOP ADDOP RELOP EQOP LANDOP LOROP
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
 %type <ast_val> FuncDef FuncType Block
-%type <value_ast_val> Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp
+%type <value_ast_val> Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp LVal
 %type <int_val> Number 
 
 %%
@@ -82,23 +91,37 @@ FuncType
   ;
 
 Block
-  : '{' Stmt '}' {
+  : {
+    env_stk.push_back({});
+  }
+  '{' BlockItems '}' {
     auto ast = new BlockAST();
-    ast -> stmt = unique_ptr<ValueBaseAST>($2);
+    ast -> insts = std::move(env_stk[env_stk.size() - 1]);
     $$ = ast;
+    env_stk.pop_back();
   }
   ;
+
+BlockItems : BlockItem | BlockItem BlockItems;
+
+BlockItem : Decl | Stmt;
 
 Stmt
   : RETURN Exp ';' {
     auto ast = new StmtAST();
     ast -> exp = unique_ptr<ValueBaseAST>($2);
-    $$ = ast;
+
+    add_inst(ast);
   }
   ;
 
 Exp
   : LOrExp {
+    auto ast = new ExpAST();
+    ast -> exp = unique_ptr<ValueBaseAST>($1);
+    $$ = ast;
+  }
+  | LVal {
     auto ast = new ExpAST();
     ast -> exp = unique_ptr<ValueBaseAST>($1);
     $$ = ast;
@@ -217,7 +240,6 @@ LAndExp
   | LAndExp LANDOP EqExp {
     auto ast = new LAndExpAST();
     ast -> type = LAndExpAST::LAndExpType::Binary;
-    ast -> op = *unique_ptr<string>($2);
     ast -> left_exp = unique_ptr<ValueBaseAST>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
     $$ = ast;
@@ -233,9 +255,27 @@ LOrExp
   | LOrExp LOROP LAndExp {
     auto ast = new LOrExpAST();
     ast -> type = LOrExpAST::LOrExpType::Binary;
-    ast -> op = *unique_ptr<string>($2);
     ast -> left_exp = unique_ptr<ValueBaseAST>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
+    $$ = ast;
+  };
+
+Decl : ConstDecl;
+
+ConstDecl : CONST INT ConstDefs ';';
+ConstDefs : ConstDef | ConstDefs ',' ConstDef;
+ConstDef
+  : IDENT '=' Exp {
+    auto ast = new ConstDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    add_inst(ast);
+  };
+
+LVal
+  : IDENT {
+    auto ast = new LValAST();
+    ast -> name = *unique_ptr<string>($1);
     $$ = ast;
   };
 
