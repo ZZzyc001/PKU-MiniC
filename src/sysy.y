@@ -49,8 +49,8 @@ using namespace std;
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block
-%type <value_ast_val> Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp LVal
+%type <ast_val> FuncDef FuncType 
+%type <value_ast_val> Block Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp LVal
 %type <int_val> Number 
 
 %%
@@ -77,7 +77,7 @@ FuncDef
     auto ast = new FuncDefAST();
     ast->func_type = unique_ptr<BaseAST>($1);
     ast->ident = *unique_ptr<string>($2);
-    ast->block = unique_ptr<BaseAST>($5);
+    ast->block = unique_ptr<ValueBaseAST>($5);
     $$ = ast;
   }
   ;
@@ -91,14 +91,18 @@ FuncType
   ;
 
 Block
-  : {
+  : '{' {
     env_stk.push_back({});
   }
-  '{' BlockItems '}' {
+  BlockItems '}' {
     auto ast = new BlockAST();
     ast -> insts = std::move(env_stk[env_stk.size() - 1]);
     $$ = ast;
     env_stk.pop_back();
+  }
+  | '{' '}' {
+    auto ast = new BlockAST();
+    $$ = ast;
   }
   ;
 
@@ -114,6 +118,15 @@ Stmt
     ast -> exp = unique_ptr<ValueBaseAST>($3);
 
     add_inst(ast);
+  }
+  | ';' {
+
+  }
+  | Exp ';' {
+    add_inst($1);
+  }
+  | Block {
+    add_inst($1);
   }
   | RETURN Exp ';' {
     auto ast = new StmtAST();

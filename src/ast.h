@@ -51,12 +51,25 @@ public:
     }
 };
 
+class ValueBaseAST : public BaseAST {
+public:
+    virtual void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const {
+        std::cout << "Run into ERROR\n";
+        return nullptr;
+    }
+
+    virtual int get_value() const {
+        std::cout << "Run into ERROR\n";
+        return 0;
+    }
+};
+
 // FuncDef 也是 BaseAST
 class FuncDefAST : public BaseAST {
 public:
-    std::unique_ptr<BaseAST> func_type;
-    std::string              ident;
-    std::unique_ptr<BaseAST> block;
+    std::unique_ptr<BaseAST>      func_type;
+    std::string                   ident;
+    std::unique_ptr<ValueBaseAST> block;
 
     void Dump() const override {
         std::cout << "FuncDefAST { ";
@@ -70,12 +83,28 @@ public:
         koopa_raw_function_data_t * res = new koopa_raw_function_data_t();
 
         std::vector<const void *> blocks;
-        blocks.push_back(block->to_koopa_item());
-        res->bbs = make_koopa_rs_from_vector(blocks, KOOPA_RSIK_BASIC_BLOCK);
+
+        koopa_raw_basic_block_data_t * entry_block = new koopa_raw_basic_block_data_t();
 
         char * tname = new char(ident.length() + 1);
-        ("@" + ident).copy(tname, sizeof(tname));
-        res->name = tname;
+        ("%entry_" + ident).copy(tname, sizeof(tname));
+
+        entry_block->name    = tname;
+        entry_block->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        entry_block->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+
+        std::vector<const void *> entry_insts;
+        block->build_value_ast(entry_insts, empty_koopa_rs());
+
+        entry_block->insts = make_koopa_rs_from_vector(entry_insts, KOOPA_RSIK_VALUE);
+
+        blocks.push_back(entry_block);
+
+        res->bbs = make_koopa_rs_from_vector(blocks, KOOPA_RSIK_BASIC_BLOCK);
+
+        char * ttname = new char(ident.length() + 1);
+        ("@" + ident).copy(ttname, sizeof(ttname));
+        res->name = ttname;
 
         res->params = empty_koopa_rs(KOOPA_RSIK_VALUE);
 
@@ -102,21 +131,8 @@ public:
     }
 };
 
-class ValueBaseAST : public BaseAST {
-public:
-    virtual void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const {
-        std::cout << "Run into ERROR\n";
-        return nullptr;
-    }
-
-    virtual int get_value() const {
-        std::cout << "Run into ERROR\n";
-        return 0;
-    }
-};
-
 // Block
-class BlockAST : public BaseAST {
+class BlockAST : public ValueBaseAST {
 public:
     std::vector<std::unique_ptr<ValueBaseAST>> insts;
 
@@ -127,26 +143,15 @@ public:
         std::cout << " }";
     }
 
-    void * to_koopa_item() const override {
+    virtual void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
         symbol_list.newEnv();
 
-        koopa_raw_basic_block_data_t * res = new koopa_raw_basic_block_data_t();
-
-        std::vector<const void *> stmts;
-        koopa_raw_slice_t         node = empty_koopa_rs();
-
         for (const auto & it : insts)
-            it->build_value_ast(stmts, node);
-
-        res->insts = make_koopa_rs_from_vector(stmts, KOOPA_RSIK_VALUE);
-
-        res->name    = "%entry";
-        res->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
-        res->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+            it->build_value_ast(buf, empty_koopa_rs());
 
         symbol_list.deleteEnv();
 
-        return res;
+        return nullptr;
     }
 };
 
@@ -771,7 +776,7 @@ public:
             store->kind.tag              = KOOPA_RVT_STORE;
             store->kind.data.store.dest  = res;
             store->kind.data.store.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
-        
+
             buf.push_back(store);
         }
         return res;

@@ -52,14 +52,14 @@ int main(int argc, const char * argv[]) {
             return 0;
         }
 
-        char * buffer = new char[1001];
-        size_t sz     = 1000;
+        char * buffer = new char[3001];
+        size_t sz     = 3000;
         eno           = koopa_dump_to_string(kp, buffer, &sz);
         if (eno != KOOPA_EC_SUCCESS) {
             std::cout << "dump to string error: " << (int) eno << std::endl;
             return 0;
         }
-        std::cout << "koopa:" << std::endl
+        std::cout << "koopa: " << sz << std::endl
                   << std::endl
                   << buffer;
 
