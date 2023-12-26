@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -188,6 +189,7 @@ public:
 
             res->kind.data.store.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
             res->kind.data.store.dest  = (koopa_raw_value_t) lval->to_koopa_item();
+            assert(res->kind.data.store.dest);
         }
         buf.push_back(res);
         return res;
@@ -763,12 +765,13 @@ public:
         if (exp) {
             koopa_raw_value_data * store = new koopa_raw_value_data();
 
+            store->ty                    = simple_koopa_raw_type_kind(KOOPA_RTT_UNIT);
             store->name                  = nullptr;
             store->used_by               = empty_koopa_rs();
             store->kind.tag              = KOOPA_RVT_STORE;
             store->kind.data.store.dest  = res;
             store->kind.data.store.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
-
+        
             buf.push_back(store);
         }
         return res;
@@ -789,6 +792,10 @@ public:
     }
 
     void * to_koopa_item() const override {
+        koopa_raw_value_t ans = symbol_list.getSymbol(name).number;
+        if (ans == nullptr)
+            std::cerr << std::endl
+                      << name << std::endl;
         return (void *) symbol_list.getSymbol(name).number;
     }
 
