@@ -152,10 +152,21 @@ public:
 // Stmt
 class StmtAST : public ValueBaseAST {
 public:
+    enum class StmtType {
+        Assign,
+        Return
+    } type;
+
+    std::unique_ptr<ValueBaseAST> lval;
+
     std::unique_ptr<ValueBaseAST> exp;
 
     void Dump() const override {
         std::cout << "StmtAST { ";
+        if (type == StmtType::Assign) {
+            lval->Dump();
+            std::cout << " = ";
+        }
         exp->Dump();
         std::cout << " }";
     }
@@ -164,14 +175,20 @@ public:
         koopa_raw_value_data * res  = new koopa_raw_value_data();
         koopa_raw_slice_t      node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
 
-        res->kind.tag = KOOPA_RVT_RETURN;
-
-        res->kind.data.ret.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
-
         res->ty      = simple_koopa_raw_type_kind(KOOPA_RTT_UNIT);
         res->name    = nullptr;
         res->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
 
+        if (type == StmtType::Return) {
+            res->kind.tag = KOOPA_RVT_RETURN;
+
+            res->kind.data.ret.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+        } else {
+            res->kind.tag = KOOPA_RVT_STORE;
+
+            res->kind.data.store.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+            res->kind.data.store.dest  = (koopa_raw_value_t) lval->to_koopa_item();
+        }
         buf.push_back(res);
         return res;
     }
@@ -204,6 +221,7 @@ class PrimaryExpAST : public ValueBaseAST {
 public:
     enum class PrimaryExpType {
         Exp,
+        Lval,
         Number
     } type;
     std::unique_ptr<ValueBaseAST> exp;
@@ -211,15 +229,15 @@ public:
 
     void Dump() const override {
         std::cout << "PrimaryExpAST { ";
-        if (type == PrimaryExpType::Exp)
-            exp->Dump();
-        else
+        if (type == PrimaryExpType::Number)
             std::cout << number;
+        else
+            exp->Dump();
         std::cout << " }";
     }
 
     void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
-        if (type == PrimaryExpType::Exp)
+        if (type != PrimaryExpType::Number)
             return exp->build_value_ast(buf, parent);
         else {
             koopa_raw_value_data * res   = new koopa_raw_value_data();
@@ -233,9 +251,9 @@ public:
     }
 
     int get_value() const override {
-        if (type == PrimaryExpType::Exp)
-            return exp->get_value();
-        return number;
+        if (type == PrimaryExpType::Number)
+            return number;
+        return exp->get_value();
     }
 };
 
@@ -701,7 +719,58 @@ public:
         res->kind.tag                = KOOPA_RVT_INTEGER;
         res->kind.data.integer.value = exp->get_value();
 
-        symbol_list.addSymbol(name, res);
+        symbol_list.addSymbol(name, { LValSymbol::SymbolType::Const, res });
+        return res;
+    }
+
+    int get_value() const override {
+        return exp->get_value();
+    }
+};
+
+class VarDefAST : public ValueBaseAST {
+public:
+    std::string                   name;
+    std::unique_ptr<ValueBaseAST> exp;
+
+    void Dump() const override {
+        std::cout << "VarDefAST { " << name;
+        if (exp) {
+            std::cout << " = ";
+            exp->Dump();
+        }
+        std::cout << " }";
+    }
+
+    void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
+        koopa_raw_value_data * res = new koopa_raw_value_data();
+
+        koopa_raw_slice_t node = make_koopa_rs_single_element(res, KOOPA_RSIK_VALUE);
+
+        res->ty = make_int_pointer_type();
+
+        char * tname = new char(name.length() + 1);
+        ("@" + name).copy(tname, sizeof(tname));
+
+        res->name     = tname;
+        res->used_by  = parent;
+        res->kind.tag = KOOPA_RVT_ALLOC;
+
+        buf.push_back(res);
+
+        symbol_list.addSymbol(name, { LValSymbol::SymbolType::Var, res });
+
+        if (exp) {
+            koopa_raw_value_data * store = new koopa_raw_value_data();
+
+            store->name                  = nullptr;
+            store->used_by               = empty_koopa_rs();
+            store->kind.tag              = KOOPA_RVT_STORE;
+            store->kind.data.store.dest  = res;
+            store->kind.data.store.value = (koopa_raw_value_t) exp->build_value_ast(buf, node);
+
+            buf.push_back(store);
+        }
         return res;
     }
 
@@ -720,15 +789,29 @@ public:
     }
 
     void * to_koopa_item() const override {
-        return symbol_list.getSymbol(name);
+        return (void *) symbol_list.getSymbol(name).number;
     }
 
     void * build_value_ast(std::vector<const void *> & buf, const koopa_raw_slice_t & parent) const override {
-        return to_koopa_item();
+        koopa_raw_value_data * res = new koopa_raw_value_data();
+
+        auto var = symbol_list.getSymbol(name);
+        if (var.type == LValSymbol::SymbolType::Const)
+            return (void *) var.number;
+        else if (var.type == LValSymbol::SymbolType::Var) {
+            res->ty                 = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+            res->name               = nullptr;
+            res->used_by            = parent;
+            res->kind.tag           = KOOPA_RVT_LOAD;
+            res->kind.data.load.src = var.number;
+            buf.push_back(res);
+        }
+
+        return res;
     }
 
     int get_value() const override {
-        return ((koopa_raw_value_data *) to_koopa_item())->kind.data.integer.value;
+        return ((koopa_raw_value_t) to_koopa_item())->kind.data.integer.value;
     }
 };
 

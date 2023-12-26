@@ -107,8 +107,17 @@ BlockItems : BlockItem | BlockItem BlockItems;
 BlockItem : Decl | Stmt;
 
 Stmt
-  : RETURN Exp ';' {
+  : LVal '=' Exp ';' {
     auto ast = new StmtAST();
+    ast -> type = StmtAST::StmtType::Assign;
+    ast -> lval = unique_ptr<ValueBaseAST>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+
+    add_inst(ast);
+  }
+  | RETURN Exp ';' {
+    auto ast = new StmtAST();
+    ast -> type = StmtAST::StmtType::Return;
     ast -> exp = unique_ptr<ValueBaseAST>($2);
 
     add_inst(ast);
@@ -121,11 +130,6 @@ Exp
     ast -> exp = unique_ptr<ValueBaseAST>($1);
     $$ = ast;
   }
-  | LVal {
-    auto ast = new ExpAST();
-    ast -> exp = unique_ptr<ValueBaseAST>($1);
-    $$ = ast;
-  }
   ;
 
 PrimaryExp
@@ -133,6 +137,11 @@ PrimaryExp
     auto ast = new PrimaryExpAST();
     ast -> type = PrimaryExpAST::PrimaryExpType::Exp;
     ast -> exp = unique_ptr<ValueBaseAST>($2);
+    $$ = ast;
+  }
+  | LVal {
+    auto ast = new ExpAST();
+    ast -> exp = unique_ptr<ValueBaseAST>($1);
     $$ = ast;
   }
   | Number {
@@ -260,7 +269,7 @@ LOrExp
     $$ = ast;
   };
 
-Decl : ConstDecl;
+Decl : ConstDecl | VarDecl;
 
 ConstDecl : CONST INT ConstDefs ';';
 ConstDefs : ConstDef | ConstDefs ',' ConstDef;
@@ -271,6 +280,22 @@ ConstDef
     ast -> exp = unique_ptr<ValueBaseAST>($3);
     add_inst(ast);
   };
+
+VarDecl : INT VarDefs ';';
+VarDefs : VarDef | VarDefs ',' VarDef;
+VarDef
+  : IDENT {
+    auto ast = new VarDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    add_inst(ast);
+  }
+  | IDENT '=' Exp {
+    auto ast = new VarDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    add_inst(ast);
+  }
+  ;
 
 LVal
   : IDENT {
