@@ -16,6 +16,8 @@
 
 std::vector<std::vector<std::unique_ptr<ValueBaseAST>>> env_stk;
 
+int branch_id = 0;
+
 void add_inst(ValueBaseAST * ast)
 {
   env_stk.rbegin()->push_back(std::unique_ptr<ValueBaseAST>(ast));
@@ -44,13 +46,13 @@ using namespace std;
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
-%token INT RETURN CONST
+%token INT RETURN CONST IF ELSE
 %token <str_val> IDENT UNARYOP MULOP ADDOP RELOP EQOP LANDOP LOROP
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
 %type <ast_val> FuncDef FuncType 
-%type <value_ast_val> Block Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp LVal
+%type <value_ast_val> Block BlockItem Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp LVal Stmt Decl OpenStmt ClosStmt SimpStmt
 %type <int_val> Number 
 
 %%
@@ -96,7 +98,9 @@ Block
   }
   BlockItems '}' {
     auto ast = new BlockAST();
-    ast -> insts = std::move(env_stk[env_stk.size() - 1]);
+    for (auto it = env_stk[env_stk.size() - 1].begin(); it < env_stk[env_stk.size() - 1].end(); ++it)
+      if (it->get())
+        ast->insts.push_back(std::move(*it));
     $$ = ast;
     env_stk.pop_back();
   }
@@ -106,34 +110,76 @@ Block
   }
   ;
 
-BlockItems : BlockItem | BlockItem BlockItems;
+BlockItems : BlockItem {
+    add_inst($1);
+  }
+  | BlockItems BlockItem {
+    add_inst($2);
+  }
+  ;
 
 BlockItem : Decl | Stmt;
 
-Stmt
+Stmt: OpenStmt | ClosStmt;
+
+OpenStmt: IF '(' Exp ')' Stmt {
+    auto ast = new StmtAST();
+    ast->type = StmtAST::StmtType::Branch;
+    ast->exp = unique_ptr<ValueBaseAST>($3);
+    ast->lval = unique_ptr<ValueBaseAST>($5);
+    ast->branch_id = branch_id++;
+    
+    $$ = ast;
+  }
+  | IF '(' Exp ')' ClosStmt ELSE OpenStmt {
+    auto ast = new StmtAST();
+    ast->type = StmtAST::StmtType::Branch;
+    ast->exp = unique_ptr<ValueBaseAST>($3);
+    ast->lval = unique_ptr<ValueBaseAST>($5);
+    ast->rval = unique_ptr<ValueBaseAST>($7);
+    ast->branch_id = branch_id++;
+    
+    $$ = ast;
+  }
+  ;
+
+ClosStmt : SimpStmt
+  | IF '(' Exp ')' ClosStmt ELSE ClosStmt {
+    auto ast = new StmtAST();
+    ast->type = StmtAST::StmtType::Branch;
+    ast->exp = unique_ptr<ValueBaseAST>($3);
+    ast->lval = unique_ptr<ValueBaseAST>($5);
+    ast->rval = unique_ptr<ValueBaseAST>($7);
+    ast->branch_id = branch_id++;
+    
+    $$ = ast;
+  }
+  ;
+
+SimpStmt
   : LVal '=' Exp ';' {
     auto ast = new StmtAST();
     ast -> type = StmtAST::StmtType::Assign;
     ast -> lval = unique_ptr<ValueBaseAST>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
 
-    add_inst(ast);
+    $$ = ast;
   }
   | ';' {
-
+    $$ = nullptr;
   }
   | Exp ';' {
-    add_inst($1);
+    $$ = $1;
   }
   | Block {
-    add_inst($1);
+    $$ = $1;
   }
   | RETURN Exp ';' {
     auto ast = new StmtAST();
     ast -> type = StmtAST::StmtType::Return;
     ast -> exp = unique_ptr<ValueBaseAST>($2);
 
-    add_inst(ast);
+    $$ = ast;
   }
   ;
 
@@ -264,6 +310,7 @@ LAndExp
     ast -> type = LAndExpAST::LAndExpType::Binary;
     ast -> left_exp = unique_ptr<ValueBaseAST>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
+    ast->branch_id = branch_id++;
     $$ = ast;
   };
 
@@ -279,10 +326,16 @@ LOrExp
     ast -> type = LOrExpAST::LOrExpType::Binary;
     ast -> left_exp = unique_ptr<ValueBaseAST>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
+    ast->branch_id = branch_id++;
     $$ = ast;
   };
 
-Decl : ConstDecl | VarDecl;
+Decl : ConstDecl {
+    $$ = nullptr;
+  }
+  | VarDecl {
+    $$ = nullptr;
+  }
 
 ConstDecl : CONST INT ConstDefs ';';
 ConstDefs : ConstDef | ConstDefs ',' ConstDef;

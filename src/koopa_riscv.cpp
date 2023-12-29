@@ -66,7 +66,7 @@ void Visit(const koopa_raw_function_t & func, std::string & res) {
 
     int size = cal_size(func);
 
-    size = ((size - 15) / 16 + 1) * 16;
+    size = ((size - 1) / 16 + 1) * 16;
 
     res += "addi sp, sp, -" + std::to_string(size) + "\n";
 
@@ -80,6 +80,7 @@ void Visit(const koopa_raw_function_t & func, std::string & res) {
 
 void Visit(const koopa_raw_basic_block_t & bb, std::string & res) {
     // 执行一些其他的必要操作
+    res += std::string(bb->name).substr(1) + ":\n";
 
     // 访问所有指令
     Visit(bb->insts, res);
@@ -93,7 +94,6 @@ void Visit(const koopa_raw_value_t & value, std::string & res) {
         res += std::to_string(kind.data.integer.value) + "\n";
         break;
     case KOOPA_RVT_ALLOC:
-        std::cerr << "Begin ALLOC" << std::endl;
         break;
     case KOOPA_RVT_LOAD:
         load_reg(kind.data.load.src, "t0", res);
@@ -113,6 +113,16 @@ void Visit(const koopa_raw_value_t & value, std::string & res) {
 
         res += "addi sp, sp, " + std::to_string(t_size) + "\nret\n";
         break;
+    case KOOPA_RVT_BRANCH:
+        load_reg(kind.data.branch.cond, "t0", res);
+        res += "bnez t0, " + std::string(kind.data.branch.true_bb->name + 1) + "\n";
+        res += "j " + std::string(kind.data.branch.false_bb->name).substr(1) + "\n";
+        break;
+
+    case KOOPA_RVT_JUMP:
+        res += "j " + std::string(kind.data.jump.target->name).substr(1) + "\n";
+        break;
+
     case KOOPA_RVT_BINARY: {
         auto & binary = kind.data.binary;
 
@@ -167,6 +177,7 @@ void Visit(const koopa_raw_value_t & value, std::string & res) {
         default:
             break;
         }
+
         res += "sw t0, " + std::to_string(getAddr(value)) + "(sp)\n";
         break;
     }
