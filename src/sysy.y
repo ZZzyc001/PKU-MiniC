@@ -14,13 +14,13 @@
 
 #include "ast.h"
 
-std::vector<std::vector<std::unique_ptr<ValueBaseAST>>> env_stk;
+std::vector<std::vector<std::unique_ptr<BaseAST>>> env_stk;
 
 int branch_id = 0;
 
-void add_inst(ValueBaseAST * ast)
+void add_inst(BaseAST * ast)
 {
-  env_stk.rbegin()->push_back(std::unique_ptr<ValueBaseAST>(ast));
+  env_stk.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
 }
 
 // 声明 lexer 函数和错误处理函数
@@ -42,6 +42,7 @@ using namespace std;
     int int_val;
     BaseAST * ast_val;
     ValueBaseAST * value_ast_val;
+    LValueBaseAST * lvalue_ast_val;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -51,8 +52,9 @@ using namespace std;
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType 
-%type <value_ast_val> Block BlockItem Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp LVal Stmt Decl OpenStmt ClosStmt SimpStmt
+%type <ast_val> FuncDef FuncType Block BlockItem Stmt Decl OpenStmt ClosStmt SimpStmt
+%type <value_ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp
+%type <lvalue_ast_val> LVal
 %type <int_val> Number 
 
 %%
@@ -79,7 +81,7 @@ FuncDef
     auto ast = new FuncDefAST();
     ast->func_type = unique_ptr<BaseAST>($1);
     ast->ident = *unique_ptr<string>($2);
-    ast->block = unique_ptr<ValueBaseAST>($5);
+    ast->block = unique_ptr<BaseAST>($5);
     $$ = ast;
   }
   ;
@@ -123,20 +125,18 @@ BlockItem : Decl | Stmt;
 Stmt: OpenStmt | ClosStmt;
 
 OpenStmt: IF '(' Exp ')' Stmt {
-    auto ast = new StmtAST();
-    ast->type = StmtAST::StmtType::Branch;
-    ast->exp = unique_ptr<ValueBaseAST>($3);
-    ast->lval = unique_ptr<ValueBaseAST>($5);
+    auto ast = new BranchStmtAST();
+    ast->exp = unique_ptr<BaseAST>($3);
+    ast->lval = unique_ptr<BaseAST>($5);
     ast->branch_id = branch_id++;
     
     $$ = ast;
   }
   | IF '(' Exp ')' ClosStmt ELSE OpenStmt {
-    auto ast = new StmtAST();
-    ast->type = StmtAST::StmtType::Branch;
-    ast->exp = unique_ptr<ValueBaseAST>($3);
-    ast->lval = unique_ptr<ValueBaseAST>($5);
-    ast->rval = unique_ptr<ValueBaseAST>($7);
+    auto ast = new BranchStmtAST();
+    ast->exp = unique_ptr<BaseAST>($3);
+    ast->lval = unique_ptr<BaseAST>($5);
+    ast->rval = unique_ptr<BaseAST>($7);
     ast->branch_id = branch_id++;
     
     $$ = ast;
@@ -145,11 +145,10 @@ OpenStmt: IF '(' Exp ')' Stmt {
 
 ClosStmt : SimpStmt
   | IF '(' Exp ')' ClosStmt ELSE ClosStmt {
-    auto ast = new StmtAST();
-    ast->type = StmtAST::StmtType::Branch;
-    ast->exp = unique_ptr<ValueBaseAST>($3);
-    ast->lval = unique_ptr<ValueBaseAST>($5);
-    ast->rval = unique_ptr<ValueBaseAST>($7);
+    auto ast = new BranchStmtAST();
+    ast->exp = unique_ptr<BaseAST>($3);
+    ast->lval = unique_ptr<BaseAST>($5);
+    ast->rval = unique_ptr<BaseAST>($7);
     ast->branch_id = branch_id++;
     
     $$ = ast;
@@ -158,10 +157,9 @@ ClosStmt : SimpStmt
 
 SimpStmt
   : LVal '=' Exp ';' {
-    auto ast = new StmtAST();
-    ast -> type = StmtAST::StmtType::Assign;
-    ast -> lval = unique_ptr<ValueBaseAST>($1);
-    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    auto ast = new AssignStmtAST();
+    ast -> lval = unique_ptr<LValueBaseAST>($1);
+    ast -> exp = unique_ptr<BaseAST>($3);
 
     $$ = ast;
   }
@@ -175,9 +173,8 @@ SimpStmt
     $$ = $1;
   }
   | RETURN Exp ';' {
-    auto ast = new StmtAST();
-    ast -> type = StmtAST::StmtType::Return;
-    ast -> exp = unique_ptr<ValueBaseAST>($2);
+    auto ast = new ReturnStmtAST();
+    ast -> exp = unique_ptr<BaseAST>($2);
 
     $$ = ast;
   }
@@ -358,7 +355,7 @@ VarDef
   | IDENT '=' Exp {
     auto ast = new VarDefAST();
     ast -> name = *unique_ptr<string>($1);
-    ast -> exp = unique_ptr<ValueBaseAST>($3);
+    ast -> exp = unique_ptr<BaseAST>($3);
     add_inst(ast);
   }
   ;
