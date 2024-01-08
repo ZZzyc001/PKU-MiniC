@@ -47,7 +47,7 @@ using namespace std;
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
-%token INT RETURN CONST IF ELSE
+%token INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
 %token <str_val> IDENT UNARYOP MULOP ADDOP RELOP EQOP LANDOP LOROP
 %token <int_val> INT_CONST
 
@@ -141,6 +141,14 @@ OpenStmt: IF '(' Exp ')' Stmt {
     
     $$ = ast;
   }
+  | WHILE '(' Exp ')' OpenStmt {
+    auto ast = new WhileStmtAST();
+    ast -> exp = unique_ptr<BaseAST>($3);
+    ast -> stmt = unique_ptr<BaseAST>($5);
+    ast -> while_id = branch_id++;
+
+    $$ = ast;
+  }
   ;
 
 ClosStmt : SimpStmt
@@ -151,6 +159,14 @@ ClosStmt : SimpStmt
     ast->rval = unique_ptr<BaseAST>($7);
     ast->branch_id = branch_id++;
     
+    $$ = ast;
+  }
+  | WHILE '(' Exp ')' ClosStmt {
+    auto ast = new WhileStmtAST();
+    ast -> exp = unique_ptr<BaseAST>($3);
+    ast -> stmt = unique_ptr<BaseAST>($5);
+    ast -> while_id = branch_id++;
+
     $$ = ast;
   }
   ;
@@ -171,6 +187,14 @@ SimpStmt
   }
   | Block {
     $$ = $1;
+  }
+  | BREAK ';' {
+    auto ast = new BreakAST();
+    $$ = ast;
+  }
+  | CONTINUE ';' {
+    auto ast = new ContinueAST();
+    $$ = ast;
   }
   | RETURN Exp ';' {
     auto ast = new ReturnStmtAST();

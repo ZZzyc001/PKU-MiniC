@@ -8,6 +8,7 @@
 #include "block.h"
 #include "koopa_util.h"
 #include "symbol_list.h"
+#include "while_container.h"
 
 static char * make_char_arr(std::string str) {
     size_t n   = str.length();
@@ -31,8 +32,9 @@ static koopa_raw_value_t make_number_koopa(int number) {
 // 所有 AST 的基类
 class BaseAST {
 public:
-    static SymbolList symbol_list;
-    static BlockMaker blocks_list;
+    static SymbolList     symbol_list;
+    static BlockMaker     blocks_list;
+    static LoopMaintainer loop_list;
 
     virtual ~BaseAST() = default;
 
@@ -299,6 +301,84 @@ public:
         end_block->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
         end_block->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
         blocks_list.addBlock(end_block);
+        return nullptr;
+    }
+};
+
+class WhileStmtAST : public BaseAST {
+public:
+    std::unique_ptr<BaseAST> exp;
+
+    std::unique_ptr<BaseAST> stmt;
+
+    int while_id;
+
+    void Dump() const override {
+        std::cout << "WhileStmtAST { ";
+        std::cout << "While ( ";
+        exp->Dump();
+        std::cout << ") ";
+        if (stmt)
+            stmt->Dump();
+        std::cout << " }";
+    }
+
+    virtual void * to_koopa_item() const override {
+        koopa_raw_basic_block_data_t * while_entry = new koopa_raw_basic_block_data_t();
+        koopa_raw_basic_block_data_t * while_body  = new koopa_raw_basic_block_data_t();
+        koopa_raw_basic_block_data_t * end_block   = new koopa_raw_basic_block_data_t();
+
+        loop_list.add(while_entry, while_body, end_block);
+
+        blocks_list.addInst(make_jump_block(while_entry));
+
+        while_entry->name    = make_char_arr("%while_entry_" + std::to_string(while_id));
+        while_entry->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        while_entry->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        blocks_list.addBlock(while_entry);
+
+        koopa_raw_value_data * br       = new koopa_raw_value_data();
+        br->ty                          = simple_koopa_raw_type_kind(KOOPA_RTT_UNIT);
+        br->name                        = nullptr;
+        br->used_by                     = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        br->kind.tag                    = KOOPA_RVT_BRANCH;
+        br->kind.data.branch.cond       = (koopa_raw_value_t) exp->to_koopa_item();
+        br->kind.data.branch.true_bb    = while_body;
+        br->kind.data.branch.false_bb   = end_block;
+        br->kind.data.branch.true_args  = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        br->kind.data.branch.false_args = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        blocks_list.addInst(br);
+
+        while_body->name    = make_char_arr("%while_body_" + std::to_string(while_id));
+        while_body->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        while_body->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        blocks_list.addBlock(while_body);
+        if (stmt)
+            stmt->to_koopa_item();
+        blocks_list.addInst(make_jump_block(while_entry));
+
+        end_block->name    = make_char_arr("%end_" + std::to_string(while_id));
+        end_block->params  = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        end_block->used_by = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        blocks_list.addBlock(end_block);
+
+        loop_list.pop();
+        return nullptr;
+    }
+};
+
+class BreakAST : public BaseAST {
+public:
+    void * to_koopa_item() const override {
+        blocks_list.addInst(make_jump_block(loop_list.get().end_block));
+        return nullptr;
+    }
+};
+
+class ContinueAST : public BaseAST {
+public:
+    void * to_koopa_item() const override {
+        blocks_list.addInst(make_jump_block(loop_list.get().while_entry));
         return nullptr;
     }
 };
