@@ -6,11 +6,12 @@ class LValSymbol {
 public:
     enum class SymbolType {
         Const,
-        Var
+        Var,
+        Function
     } type;
-    koopa_raw_value_t number;
+    void * number;
     LValSymbol() = default;
-    LValSymbol(SymbolType t, koopa_raw_value_t n):
+    LValSymbol(SymbolType t, void * n):
         type(t), number(n) {}
 };
 

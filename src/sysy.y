@@ -15,12 +15,46 @@
 #include "ast.h"
 
 std::vector<std::vector<std::unique_ptr<BaseAST>>> env_stk;
+std::vector<std::vector<std::unique_ptr<BaseAST>>> const_value_list;
+std::vector<std::vector<std::unique_ptr<BaseAST>>> var_value_list;
+std::vector<std::unique_ptr<BaseAST>> func_list;
+std::vector<std::unique_ptr<ParamAST>> fparams;
+std::vector<std::vector<std::unique_ptr<BaseAST>>> rparams;
+
 
 int branch_id = 0;
 
-void add_inst(BaseAST * ast)
-{
+void add_inst(BaseAST * ast) {
   env_stk.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
+}
+
+void move_inst(std::vector<std::unique_ptr<BaseAST>> & list) {
+  auto & top = *env_stk.rbegin();
+  top.insert(top.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+  list.clear();
+}
+
+void switch_to_global(std::vector<std::unique_ptr<BaseAST>> & dst, std::vector<std::unique_ptr<BaseAST>> & src) {
+    std::cout << "Switch: " << std::endl;
+    for (auto & it : src) {
+        VarDefAST * t = (VarDefAST *) it.get();
+
+        std::cout << t->name;
+    }
+    for (auto & it : src) {
+        VarDefAST * t   = (VarDefAST *) it.release();
+        auto        ast = new GlobalVarDefAST();
+        ast->name       = t->name;
+        ast->exp        = std::move(t->exp);
+        dst.push_back(std::unique_ptr<BaseAST>(ast));
+    }
+
+    for (auto & it : dst) {
+        VarDefAST * t = (VarDefAST *) it.get();
+
+        std::cout << t->name;
+    }
+    src.clear();
 }
 
 // 声明 lexer 函数和错误处理函数
@@ -47,12 +81,12 @@ using namespace std;
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
-%token INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
+%token INT VOID RETURN CONST IF ELSE WHILE BREAK CONTINUE
 %token <str_val> IDENT UNARYOP MULOP ADDOP RELOP EQOP LANDOP LOROP
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block BlockItem Stmt Decl OpenStmt ClosStmt SimpStmt
+%type <ast_val> FuncDef Type Block BlockItem Stmt Decl OpenStmt ClosStmt SimpStmt
 %type <value_ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp
 %type <lvalue_ast_val> LVal
 %type <int_val> Number 
@@ -65,38 +99,81 @@ using namespace std;
 // 此时我们应该把 FuncDef 返回的结果收集起来, 作为 AST 传给调用 parser 的函数
 // $1 指代规则里第一个符号的返回值, 也就是 FuncDef 的返回值
 CompUnit
-  : FuncDef {
+  : {
+    const_value_list.push_back({});
+    var_value_list.push_back({});
+  } GlobalList {
     auto comp_unit = make_unique<CompUnitAST>();
-    comp_unit->func_def = unique_ptr<BaseAST>($1);
+    comp_unit->func_list = std::move(func_list);
+    comp_unit->const_value_list = std::move(*const_value_list.rbegin());
+    switch_to_global(comp_unit->var_value_list, *var_value_list.rbegin());
+    const_value_list.pop_back();
+    var_value_list.pop_back();
     ast = move(comp_unit);
   }
   ;
+
+GlobalList
+  : FuncDef {
+    func_list.push_back(std::unique_ptr<BaseAST>($1));
+  }
+  | GlobalList FuncDef {
+    func_list.push_back(std::unique_ptr<BaseAST>($2));
+  }
+  | ConstDecl | VarDecl | GlobalList ConstDecl | GlobalList VarDecl;
 
 // FuncDef ::= FuncType IDENT '(' ')' Block;
 // 我们这里可以直接写 '(' 和 ')', 因为之前在 lexer 里已经处理了单个字符的情况
 // 解析完成后, 把这些符号的结果收集起来, 然后拼成一个新的字符串, 作为结果返回
 // $$ 表示非终结符的返回值, 我们可以通过给这个符号赋值的方法来返回结果
 FuncDef
-  : FuncType IDENT '(' ')' Block {
+  : Type IDENT '(' FuncFParams ')' Block {
     auto ast = new FuncDefAST();
-    ast->func_type = unique_ptr<BaseAST>($1);
+    ast->func_type = unique_ptr<TypeAST>((TypeAST *)$1);
     ast->ident = *unique_ptr<string>($2);
-    ast->block = unique_ptr<BaseAST>($5);
+    ast->block = unique_ptr<BlockAST>((BlockAST *)$6);
+    ast->func_params = std::move(fparams);
+    $$ = ast;
+  }
+  | Type IDENT '(' ')' Block {
+    auto ast = new FuncDefAST();
+    ast->func_type = unique_ptr<TypeAST>((TypeAST *)$1);
+    ast->ident = *unique_ptr<string>($2);
+    ast->block = unique_ptr<BlockAST>((BlockAST *)$5);
     $$ = ast;
   }
   ;
 
 // 同上, 不再解释
-FuncType
+Type
   : INT {
-    auto ast = new FuncTypeAST();
+    auto ast = new TypeAST();
+    ast->name = "int";
+    $$ = ast;
+  }
+  | VOID {
+    auto ast = new TypeAST();
+    ast->name = "void";
     $$ = ast;
   }
   ;
 
+FuncFParams : FuncFParam | FuncFParams ',' FuncFParam;
+
+FuncFParam
+  : INT IDENT {
+    auto ast = new ParamAST();
+    ast->type = ParamAST::ParamType::Int;
+    ast->name = *unique_ptr<string>($2);
+    ast->index = fparams.size();
+    fparams.push_back(std::unique_ptr<ParamAST>(ast));
+  };
+
 Block
   : '{' {
     env_stk.push_back({});
+    const_value_list.push_back({});
+    var_value_list.push_back({});
   }
   BlockItems '}' {
     auto ast = new BlockAST();
@@ -105,6 +182,8 @@ Block
         ast->insts.push_back(std::move(*it));
     $$ = ast;
     env_stk.pop_back();
+    const_value_list.pop_back();
+    var_value_list.pop_back();
   }
   | '{' '}' {
     auto ast = new BlockAST();
@@ -199,7 +278,10 @@ SimpStmt
   | RETURN Exp ';' {
     auto ast = new ReturnStmtAST();
     ast -> exp = unique_ptr<BaseAST>($2);
-
+    $$ = ast;
+  }
+  | RETURN ';' {
+    auto ast = new ReturnStmtAST();
     $$ = ast;
   }
   ;
@@ -252,6 +334,30 @@ UnaryExp
     ast -> op = *unique_ptr<string>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($2);
     $$ = ast;
+  }
+  | IDENT '(' {
+      rparams.push_back({});
+  } FuncRParams ')' {
+    auto ast = new UnaryExpAST();
+    ast -> type = UnaryExpAST::UnaryExpType::Function;
+    ast -> op = *unique_ptr<string>($1);
+    ast->func_r_params = std::move(*rparams.rbegin());
+    rparams.pop_back();
+    $$ = ast;
+  }
+  | IDENT '(' ')' {
+    auto ast = new UnaryExpAST();
+    ast -> type = UnaryExpAST::UnaryExpType::Function;
+    ast -> op = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  ;
+
+FuncRParams : FuncRParam | FuncRParams ',' FuncRParam;
+
+FuncRParam 
+  : Exp {
+    rparams.rbegin()->push_back(std::unique_ptr<BaseAST>($1));
   }
   ;
 
@@ -352,35 +458,37 @@ LOrExp
   };
 
 Decl : ConstDecl {
+    move_inst(*const_value_list.rbegin());
     $$ = nullptr;
   }
   | VarDecl {
+    move_inst(*var_value_list.rbegin());
     $$ = nullptr;
   }
 
-ConstDecl : CONST INT ConstDefs ';';
+ConstDecl : CONST Type ConstDefs ';';
 ConstDefs : ConstDef | ConstDefs ',' ConstDef;
 ConstDef
   : IDENT '=' Exp {
     auto ast = new ConstDefAST();
     ast -> name = *unique_ptr<string>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
-    add_inst(ast);
+    const_value_list.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
   };
 
-VarDecl : INT VarDefs ';';
+VarDecl : Type VarDefs ';';
 VarDefs : VarDef | VarDefs ',' VarDef;
 VarDef
   : IDENT {
     auto ast = new VarDefAST();
     ast -> name = *unique_ptr<string>($1);
-    add_inst(ast);
+    var_value_list.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
   }
   | IDENT '=' Exp {
     auto ast = new VarDefAST();
     ast -> name = *unique_ptr<string>($1);
     ast -> exp = unique_ptr<BaseAST>($3);
-    add_inst(ast);
+    var_value_list.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
   }
   ;
 

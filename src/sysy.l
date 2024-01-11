@@ -51,6 +51,7 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 "while"         { return WHILE; }
 "break"         { return BREAK; }
 "continue"      { return CONTINUE; }
+"void"          { return VOID; }
 
 {UnaryOperator}      { yylval.str_val = new string(yytext); return UNARYOP; }
 {AddOperator}      { yylval.str_val = new string(yytext); return ADDOP; }
