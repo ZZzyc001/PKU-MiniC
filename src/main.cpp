@@ -25,6 +25,9 @@ int main(int argc, const char * argv[]) {
     auto mode   = argv[1];
     auto input  = argv[2];
     auto output = argv[4];
+    // std::string  mode   = "-riscv";
+    // const char * input  = "hello.c";
+    // const char * output = "hello.koopa";
 
     // 打开输入文件, 并且指定 lexer 在解析的时候读取这个文件
     yyin = fopen(input, "r");
