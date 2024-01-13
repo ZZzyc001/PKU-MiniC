@@ -14,13 +14,20 @@
 
 #include "ast.h"
 
+enum class ValType {
+  Const,
+  Var,
+  Array
+};
+
 std::vector<std::vector<std::unique_ptr<BaseAST>>> env_stk;
-std::vector<std::vector<std::unique_ptr<BaseAST>>> const_value_list;
-std::vector<std::vector<std::unique_ptr<BaseAST>>> var_value_list;
+std::vector<std::vector<std::pair<ValType, std::unique_ptr<BaseAST>>>> value_list;
 std::vector<std::unique_ptr<BaseAST>> func_list;
 std::vector<std::unique_ptr<ParamAST>> fparams;
 std::vector<std::vector<std::unique_ptr<BaseAST>>> rparams;
-
+std::vector<std::unique_ptr<ValueBaseAST>> arr_size;
+std::vector<std::vector<std::unique_ptr<BaseAST>>> idx_stk;
+std::vector<std::vector<std::unique_ptr<InitValAST>>> arr_list;
 
 int branch_id = 0;
 
@@ -28,33 +35,11 @@ void add_inst(BaseAST * ast) {
   env_stk.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
 }
 
-void move_inst(std::vector<std::unique_ptr<BaseAST>> & list) {
+void move_inst(std::vector<std::pair<ValType, std::unique_ptr<BaseAST>>> & list) {
   auto & top = *env_stk.rbegin();
-  top.insert(top.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+  for (auto & it : list)
+    top.push_back(std::move(it.second));
   list.clear();
-}
-
-void switch_to_global(std::vector<std::unique_ptr<BaseAST>> & dst, std::vector<std::unique_ptr<BaseAST>> & src) {
-    std::cout << "Switch: " << std::endl;
-    for (auto & it : src) {
-        VarDefAST * t = (VarDefAST *) it.get();
-
-        std::cout << t->name;
-    }
-    for (auto & it : src) {
-        VarDefAST * t   = (VarDefAST *) it.release();
-        auto        ast = new GlobalVarDefAST();
-        ast->name       = t->name;
-        ast->exp        = std::move(t->exp);
-        dst.push_back(std::unique_ptr<BaseAST>(ast));
-    }
-
-    for (auto & it : dst) {
-        VarDefAST * t = (VarDefAST *) it.get();
-
-        std::cout << t->name;
-    }
-    src.clear();
 }
 
 // 声明 lexer 函数和错误处理函数
@@ -77,6 +62,7 @@ using namespace std;
     BaseAST * ast_val;
     ValueBaseAST * value_ast_val;
     LValueBaseAST * lvalue_ast_val;
+    InitValAST * init_ast_val;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -89,6 +75,7 @@ using namespace std;
 %type <ast_val> FuncDef Type Block BlockItem Stmt Decl OpenStmt ClosStmt SimpStmt
 %type <value_ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp LAndExp LOrExp
 %type <lvalue_ast_val> LVal
+%type <init_ast_val> InitVal
 %type <int_val> Number 
 
 %%
@@ -100,15 +87,30 @@ using namespace std;
 // $1 指代规则里第一个符号的返回值, 也就是 FuncDef 的返回值
 CompUnit
   : {
-    const_value_list.push_back({});
-    var_value_list.push_back({});
+    value_list.push_back({});
   } GlobalList {
     auto comp_unit = make_unique<CompUnitAST>();
     comp_unit->func_list = std::move(func_list);
-    comp_unit->const_value_list = std::move(*const_value_list.rbegin());
-    switch_to_global(comp_unit->var_value_list, *var_value_list.rbegin());
-    const_value_list.pop_back();
-    var_value_list.pop_back();
+    for (auto & it : *value_list.rbegin()) {
+      if (it.first == ValType::Var) {
+        VarDefAST * t   = (VarDefAST *) it.second.release();
+        auto        ast = new GlobalVarDefAST();
+        ast->name       = t->name;
+        ast->exp        = std::move(t->exp);
+        comp_unit->var_value_list.push_back(std::unique_ptr<BaseAST>(ast));
+      }
+      else if (it.first == ValType::Array) {
+        ArrayDefAST * t = (ArrayDefAST *) it.second.release();
+        auto        ast = new GlobalArrayDefAST();
+        ast->name       = t->name;
+        ast->sz_exp     = std::move(t->sz_exp);
+        ast->init_val   = std::move(t->init_val);
+        comp_unit->var_value_list.push_back(std::unique_ptr<BaseAST>(ast));
+      }
+      else
+        comp_unit->const_value_list.push_back(std::move(it.second));
+    }
+    value_list.pop_back();
     ast = move(comp_unit);
   }
   ;
@@ -167,13 +169,35 @@ FuncFParam
     ast->name = *unique_ptr<string>($2);
     ast->index = fparams.size();
     fparams.push_back(std::unique_ptr<ParamAST>(ast));
-  };
+  }
+  | INT IDENT '[' ']' {
+    auto ast = new ParamAST();
+    ast->type = ParamAST::ParamType::Array;
+    ast->name = *unique_ptr<string>($2);
+    ast->index = fparams.size();
+    fparams.push_back(std::unique_ptr<ParamAST>(ast));
+  }
+  | INT IDENT '[' ']' ArraySizeList {
+    auto ast = new ParamAST();
+    ast->type = ParamAST::ParamType::Array;
+    ast->name = *unique_ptr<string>($2);
+    ast->index = fparams.size();
+    ast->sz_exp = std::move(arr_size);
+    fparams.push_back(std::unique_ptr<ParamAST>(ast));
+  }
+
+ArraySizeList : ArraySize | ArraySizeList ArraySize;
+
+ArraySize
+  : '[' Exp ']' {
+    arr_size.push_back(std::unique_ptr<ValueBaseAST>($2));
+  }
+  ;
 
 Block
   : '{' {
     env_stk.push_back({});
-    const_value_list.push_back({});
-    var_value_list.push_back({});
+    value_list.push_back({});
   }
   BlockItems '}' {
     auto ast = new BlockAST();
@@ -182,8 +206,7 @@ Block
         ast->insts.push_back(std::move(*it));
     $$ = ast;
     env_stk.pop_back();
-    const_value_list.pop_back();
-    var_value_list.pop_back();
+    value_list.pop_back();
   }
   | '{' '}' {
     auto ast = new BlockAST();
@@ -458,11 +481,11 @@ LOrExp
   };
 
 Decl : ConstDecl {
-    move_inst(*const_value_list.rbegin());
+    move_inst(*value_list.rbegin());
     $$ = nullptr;
   }
   | VarDecl {
-    move_inst(*var_value_list.rbegin());
+    move_inst(*value_list.rbegin());
     $$ = nullptr;
   }
 
@@ -473,8 +496,22 @@ ConstDef
     auto ast = new ConstDefAST();
     ast -> name = *unique_ptr<string>($1);
     ast -> exp = unique_ptr<ValueBaseAST>($3);
-    const_value_list.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
-  };
+    value_list.rbegin()->push_back({ValType::Const, std::unique_ptr<BaseAST>(ast)});
+  }
+  | IDENT ArraySizeList '=' InitVal {
+    auto ast = new ArrayDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    ast -> sz_exp = std::move(arr_size);
+    ast -> init_val = unique_ptr<InitValAST>($4);
+    value_list.rbegin()->push_back({ValType::Array, std::unique_ptr<BaseAST>(ast)});
+  }
+  | IDENT ArraySizeList {
+    auto ast = new ArrayDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    ast -> sz_exp = std::move(arr_size);
+    value_list.rbegin()->push_back({ValType::Array, std::unique_ptr<BaseAST>(ast)});
+  }
+  ;
 
 VarDecl : Type VarDefs ';';
 VarDefs : VarDef | VarDefs ',' VarDef;
@@ -482,22 +519,87 @@ VarDef
   : IDENT {
     auto ast = new VarDefAST();
     ast -> name = *unique_ptr<string>($1);
-    var_value_list.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
+    value_list.rbegin()->push_back({ValType::Var, std::unique_ptr<BaseAST>(ast)});
   }
   | IDENT '=' Exp {
     auto ast = new VarDefAST();
     ast -> name = *unique_ptr<string>($1);
     ast -> exp = unique_ptr<BaseAST>($3);
-    var_value_list.rbegin()->push_back(std::unique_ptr<BaseAST>(ast));
+    value_list.rbegin()->push_back({ValType::Var, std::unique_ptr<BaseAST>(ast)});
+  }
+  | IDENT ArraySizeList '=' InitVal {
+    auto ast = new ArrayDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    ast -> sz_exp = std::move(arr_size);
+    ast -> init_val = unique_ptr<InitValAST>($4);
+    value_list.rbegin()->push_back({ValType::Array, std::unique_ptr<BaseAST>(ast)});
+  }
+  | IDENT ArraySizeList {
+    auto ast = new ArrayDefAST();
+    ast -> name = *unique_ptr<string>($1);
+    ast -> sz_exp = std::move(arr_size);
+    value_list.rbegin()->push_back({ValType::Array, std::unique_ptr<BaseAST>(ast)});
+  }
+  ;
+
+InitVal :
+  Exp {
+    auto ast = new InitValAST();
+    ast->type = InitValAST::InitValType::Exp;
+    ast->exp = unique_ptr<ValueBaseAST>($1);
+    $$ = ast;
+  }
+  | '{' {
+    arr_list.push_back({});
+  }
+  ArrInitList '}' {
+    auto ast = new InitValAST();
+    ast->type = InitValAST::InitValType::Array;
+    ast->arr_list = std::move(*arr_list.rbegin());
+    $$ = ast;
+    arr_list.pop_back();
+  }
+  | '{' '}' {
+    auto ast = new InitValAST();
+    ast->type = InitValAST::InitValType::Array;
+    $$ = ast;
+  }
+  ;
+
+ArrInitList : 
+  InitVal {
+    arr_list.rbegin()->push_back(std::unique_ptr<InitValAST>($1));
+  }
+  | ArrInitList ',' InitVal {
+    arr_list.rbegin()->push_back(std::unique_ptr<InitValAST>($3));
   }
   ;
 
 LVal
   : IDENT {
     auto ast = new LValAST();
+    ast -> type = LValAST::ValType::Num;
     ast -> name = *unique_ptr<string>($1);
     $$ = ast;
-  };
+  }
+  | IDENT {
+    idx_stk.push_back({});
+  } IndexList {
+    auto ast = new LValAST();
+    ast -> type = LValAST::ValType::Array;
+    ast -> name = *unique_ptr<string>($1);
+    ast -> idx = std::move(*idx_stk.rbegin());
+    $$ = ast;
+    idx_stk.pop_back();
+  }
+  ;
+
+IndexList : Index | IndexList Index;
+
+Index : '[' Exp ']' {
+    idx_stk.rbegin()->push_back(std::unique_ptr<BaseAST>($2));
+  }
+  ;
 
 Number
   : INT_CONST {

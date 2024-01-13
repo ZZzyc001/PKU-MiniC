@@ -25,7 +25,7 @@ int main(int argc, const char * argv[]) {
     auto mode   = argv[1];
     auto input  = argv[2];
     auto output = argv[4];
-    // std::string  mode   = "-riscv";
+    // std::string  mode   = "-koopa";
     // const char * input  = "hello.c";
     // const char * output = "hello.koopa";
 
@@ -55,8 +55,8 @@ int main(int argc, const char * argv[]) {
             return 0;
         }
 
-        char * buffer = new char[10001];
-        size_t sz     = 10000;
+        char * buffer = new char[1000001];
+        size_t sz     = 1000000;
         eno           = koopa_dump_to_string(kp, buffer, &sz);
         if (eno != KOOPA_EC_SUCCESS) {
             std::cout << "dump to string error: " << (int) eno << std::endl;
@@ -71,7 +71,7 @@ int main(int argc, const char * argv[]) {
         yyout.close();
     }
 
-    if (mode == string("-riscv")) {
+    if (mode == string("-riscv") || mode == string("-perf")) {
         std::string str_riscv = gen_riscv_from_koopa_raw_program(krp);
         std::cout << "riscv:" << std::endl
                   << std::endl

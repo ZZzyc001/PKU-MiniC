@@ -118,12 +118,15 @@ public:
 class ParamAST : public BaseAST {
 public:
     enum class ParamType {
-        Int
+        Int,
+        Array
     } type;
 
     std::string name;
 
     int index;
+
+    std::vector<std::unique_ptr<ValueBaseAST>> sz_exp;
 
     void Dump() const override {
         std::cout << "TypeAST { ";
@@ -132,7 +135,22 @@ public:
     }
 
     void * get_type() const {
-        return simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        if (type == ParamType::Int)
+            return simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+        else {
+            if (sz_exp.empty())
+                return make_int_pointer_type();
+            else {
+                std::vector<int> sz;
+                for (const auto & e : sz_exp)
+                    sz.push_back(e->get_value());
+                koopa_raw_type_kind * ty  = make_array_type(sz);
+                koopa_raw_type_kind * tty = new koopa_raw_type_kind();
+                tty->tag                  = KOOPA_RTT_POINTER;
+                tty->data.pointer.base    = ty;
+                return tty;
+            }
+        }
     }
 
     void * to_koopa_item() const override {
@@ -215,7 +233,8 @@ public:
 
     void Dump() const override {
         std::cout << "ReturnStmtAST { ";
-        exp->Dump();
+        if (exp)
+            exp->Dump();
         std::cout << " }";
     }
 
@@ -269,7 +288,7 @@ public:
             par.push_back(fp->get_type());
 
         ty->data.function.params = make_koopa_rs_from_vector(par, KOOPA_RSIK_TYPE);
-        ty->data.function.ret    = (const struct koopa_raw_type_kind *) func_type->to_koopa_item();
+        ty->data.function.ret    = (const koopa_raw_type_kind *) func_type->to_koopa_item();
 
         res->ty   = ty;
         res->name = make_char_arr("@" + ident);
@@ -293,13 +312,17 @@ public:
         symbol_list.newEnv();
 
         blocks_list.addBlock(entry_block);
+        blocks_list.setFunc(res);
 
         for (size_t i = 0; i < func_params.size(); ++i) {
             auto & fp = func_params[i];
 
-            koopa_raw_value_data * allo = make_alloc_int("@" + fp->name);
+            koopa_raw_value_data * allo = make_alloc_type("@" + fp->name, ((koopa_raw_value_t) par[i])->ty);
 
-            symbol_list.addSymbol(fp->name, LValSymbol(LValSymbol::SymbolType::Var, allo));
+            if (allo->ty->data.pointer.base->tag == KOOPA_RTT_POINTER)
+                symbol_list.addSymbol(fp->name, LValSymbol(LValSymbol::SymbolType::Pointer, allo));
+            else
+                symbol_list.addSymbol(fp->name, LValSymbol(LValSymbol::SymbolType::Var, allo));
 
             blocks_list.addInst(allo);
 
@@ -315,11 +338,6 @@ public:
             blocks_list.addInst(sto);
         }
         block->to_koopa_item_no_env();
-
-        if (func_type->name == "void") {
-            ReturnStmtAST end;
-            end.to_koopa_item();
-        }
 
         symbol_list.deleteEnv();
 
@@ -502,7 +520,14 @@ public:
 
 class LValAST : public LValueBaseAST {
 public:
+    enum class ValType {
+        Num,
+        Array
+    } type;
+
     std::string name;
+
+    std::vector<std::unique_ptr<BaseAST>> idx;
 
     void Dump() const override {
         std::cout << "LValAST { " << name;
@@ -513,6 +538,7 @@ public:
         koopa_raw_value_data * res = new koopa_raw_value_data();
 
         auto var = symbol_list.getSymbol(name);
+
         if (var.type == LValSymbol::SymbolType::Const)
             return (void *) var.number;
         else if (var.type == LValSymbol::SymbolType::Var) {
@@ -522,6 +548,81 @@ public:
             res->kind.tag           = KOOPA_RVT_LOAD;
             res->kind.data.load.src = (koopa_raw_value_t) var.number;
             blocks_list.addInst(res);
+        } else if (var.type == LValSymbol::SymbolType::Array) {
+            bool need_load = false;
+
+            koopa_raw_value_data * get;
+
+            koopa_raw_value_data_t * src = (koopa_raw_value_data *) var.number;
+            if (idx.empty())
+                blocks_list.addInst(set_ptr(src));
+            else
+                for (auto & i : idx) {
+                    get = set_ptr(src, (koopa_raw_value_t) i->to_koopa_item());
+                    blocks_list.addInst(get);
+                    if (get->ty->data.pointer.base->tag == KOOPA_RTT_INT32)
+                        need_load = true;
+                    src = get;
+                }
+
+            if (need_load) {
+                res->ty                 = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+                res->name               = nullptr;
+                res->used_by            = empty_koopa_rs(KOOPA_RSIK_VALUE);
+                res->kind.tag           = KOOPA_RVT_LOAD;
+                res->kind.data.load.src = get;
+                blocks_list.addInst(res);
+            } else if (src->ty->data.pointer.base->tag == KOOPA_RTT_ARRAY) {
+                res = set_ptr(src);
+                blocks_list.addInst(res);
+            } else
+                res = src;
+        } else if (var.type == LValSymbol::SymbolType::Pointer) {
+            koopa_raw_value_data * src = (koopa_raw_value_data *) var.number;
+
+            koopa_raw_value_data * load0 = new koopa_raw_value_data();
+
+            load0->ty                 = src->ty->data.pointer.base;
+            load0->name               = nullptr;
+            load0->used_by            = empty_koopa_rs(KOOPA_RSIK_VALUE);
+            load0->kind.tag           = KOOPA_RVT_LOAD;
+            load0->kind.data.load.src = src;
+            blocks_list.addInst(load0);
+
+            bool need_load = false;
+
+            bool first = true;
+
+            koopa_raw_value_data * get;
+            src = load0;
+
+            for (auto & i : idx) {
+                if (first) {
+                    get = set_ptr(src, (koopa_raw_value_t) i->to_koopa_item(), false, KOOPA_RVT_GET_PTR);
+
+                    first = false;
+                } else
+                    get = set_ptr(src, (koopa_raw_value_t) i->to_koopa_item());
+
+                blocks_list.addInst(get);
+                src = get;
+                if (get->ty->data.pointer.base->tag == KOOPA_RTT_INT32)
+                    need_load = true;
+            }
+
+            if (need_load) {
+                res->ty                 = simple_koopa_raw_type_kind(KOOPA_RTT_INT32);
+                res->name               = nullptr;
+                res->used_by            = empty_koopa_rs(KOOPA_RSIK_VALUE);
+                res->kind.tag           = KOOPA_RVT_LOAD;
+                res->kind.data.load.src = get;
+                blocks_list.addInst(res);
+            } else if (src->ty->data.pointer.base->tag == KOOPA_RTT_ARRAY) {
+                res = set_ptr(src);
+
+                blocks_list.addInst(res);
+            } else
+                res = src;
         }
 
         return res;
@@ -532,7 +633,44 @@ public:
     }
 
     void * build_left_value() const override {
-        return (void *) symbol_list.getSymbol(name).number;
+        if (type == ValType::Num)
+            return (void *) symbol_list.getSymbol(name).number;
+        else {
+            koopa_raw_value_t src = (koopa_raw_value_t) symbol_list.getSymbol(name).number;
+
+            koopa_raw_value_data * get;
+            if (src->ty->data.pointer.base->tag == KOOPA_RTT_POINTER) {
+                koopa_raw_value_data * load0 = new koopa_raw_value_data();
+                load0->ty                    = src->ty->data.pointer.base;
+                load0->name                  = nullptr;
+                load0->used_by               = empty_koopa_rs(KOOPA_RSIK_VALUE);
+                load0->kind.tag              = KOOPA_RVT_LOAD;
+                load0->kind.data.load.src    = src;
+                blocks_list.addInst(load0);
+
+                bool first = true;
+
+                src = load0;
+                for (auto & i : idx) {
+                    if (first) {
+                        get = set_ptr(src, (koopa_raw_value_t) i->to_koopa_item(), false, KOOPA_RVT_GET_PTR);
+
+                        first = false;
+                    } else
+                        get = set_ptr(src, (koopa_raw_value_t) i->to_koopa_item());
+
+                    blocks_list.addInst(get);
+                    src = get;
+                }
+            } else {
+                for (auto & i : idx) {
+                    get = set_ptr(src, (koopa_raw_value_t) i->to_koopa_item());
+                    blocks_list.addInst(get);
+                    src = get;
+                }
+            }
+            return get;
+        }
     }
 };
 
@@ -1218,6 +1356,205 @@ public:
         blocks_list.addInst(res);
 
         symbol_list.addSymbol(name, { LValSymbol::SymbolType::Var, res });
+
+        return res;
+    }
+};
+
+class InitValAST : public BaseAST {
+public:
+    enum class InitValType {
+        Exp,
+        Array
+    } type;
+
+    std::vector<koopa_raw_value_t> cache;
+
+    bool is_const = false;
+
+    std::unique_ptr<ValueBaseAST> exp;
+
+    std::vector<std::unique_ptr<InitValAST>> arr_list;
+
+    void Dump() const override {
+        std::cout << "InitValAST { ";
+        if (type == InitValType::Exp)
+            exp->Dump();
+        else
+            for (const auto & it : arr_list)
+                it->Dump();
+
+        std::cout << " }";
+    }
+
+    void sub_preprocess(std::vector<int> & pro, int align_pos, std::vector<koopa_raw_value_t> & buf) {
+        int target_size = buf.size() + pro[align_pos];
+
+        for (auto & t : arr_list)
+            if (t->type == InitValType::Exp)
+                if (is_const)
+                    buf.push_back(make_number_koopa(t->exp->get_value()));
+                else
+                    buf.push_back((koopa_raw_value_t) t->exp->to_koopa_item());
+            else {
+                int new_align_pos = align_pos + 1;
+
+                while (cache.size() % pro[new_align_pos] != 0)
+                    ++new_align_pos;
+
+                t->sub_preprocess(pro, new_align_pos, buf);
+            }
+
+        while (buf.size() < target_size)
+            buf.push_back(make_number_koopa(0));
+    }
+
+    void preprocess(const std::vector<int> & sz) {
+        std::vector<int> pro(sz.size() + 1);
+
+        pro[sz.size()] = 1;
+        for (int i = sz.size() - 1; i >= 0; --i)
+            pro[i] = pro[i + 1] * sz[i];
+
+        sub_preprocess(pro, 0, cache);
+    }
+
+    koopa_raw_value_t at(int idx) {
+        if (type == InitValType::Array)
+            return cache[idx];
+        else
+            return (koopa_raw_value_t) exp->to_koopa_item();
+    }
+
+    koopa_raw_value_t sub_make_aggerate(const std::vector<int> & sz, std::vector<int> & pro, int align_pos, std::vector<koopa_raw_value_t> & buf, int st_pos) {
+        if (pro[align_pos] == 1)
+            return buf[st_pos];
+
+        koopa_raw_value_data * res = new koopa_raw_value_data();
+
+        res->ty       = make_array_type(sz, align_pos);
+        res->name     = nullptr;
+        res->used_by  = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        res->kind.tag = KOOPA_RVT_AGGREGATE;
+
+        std::vector<const void *> elems;
+
+        for (int i = 0; i < sz[align_pos]; ++i)
+            elems.push_back(sub_make_aggerate(sz, pro, align_pos + 1, buf, st_pos + pro[align_pos + 1] * i));
+
+        res->kind.data.aggregate.elems = make_koopa_rs_from_vector(elems, KOOPA_RSIK_VALUE);
+        return res;
+    }
+
+    koopa_raw_value_t make_aggerate(const std::vector<int> & sz) {
+        std::vector<int> pro(sz.size() + 1);
+
+        pro[sz.size()] = 1;
+
+        for (int i = sz.size() - 1; i >= 0; --i)
+            pro[i] = pro[i + 1] * sz[i];
+
+        return sub_make_aggerate(sz, pro, 0, cache, 0);
+    }
+};
+
+class ArrayDefAST : public BaseAST {
+    koopa_raw_value_data * get_index(int i, std::vector<int> & pro, koopa_raw_value_data * src, int cur_pos = 0) const {
+        if (cur_pos >= pro.size())
+            return src;
+
+        koopa_raw_value_data * get = set_ptr(src, make_number_koopa(i / pro[cur_pos]));
+
+        blocks_list.addInst(get);
+
+        return get_index(i % pro[cur_pos], pro, get, cur_pos + 1);
+    }
+
+public:
+    std::string                 name;
+    std::unique_ptr<InitValAST> init_val;
+
+    std::vector<std::unique_ptr<ValueBaseAST>> sz_exp;
+
+    void * to_koopa_item() const override {
+        int total_size = 1;
+
+        std::vector<int> sz;
+        for (const auto & e : sz_exp) {
+            int tmp = e->get_value();
+            total_size *= tmp;
+            sz.push_back(tmp);
+        }
+
+        koopa_raw_value_data * res = new koopa_raw_value_data();
+        koopa_raw_type_kind *  ty  = make_array_type(sz);
+        koopa_raw_type_kind *  tty = new koopa_raw_type_kind();
+        tty->tag                   = KOOPA_RTT_POINTER;
+        tty->data.pointer.base     = ty;
+        res->ty                    = tty;
+        res->name                  = make_char_arr("@" + name);
+        res->used_by               = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        res->kind.tag              = KOOPA_RVT_ALLOC;
+
+        blocks_list.addInst(res);
+        symbol_list.addSymbol(name, LValSymbol(LValSymbol::SymbolType::Array, res));
+
+        if (init_val) {
+            init_val->preprocess(sz);
+
+            std::vector<int> pro(sz.size());
+
+            pro[sz.size() - 1] = 1;
+            for (int i = sz.size() - 2; i >= 0; --i)
+                pro[i] = pro[i + 1] * sz[i + 1];
+
+            for (int i = 0; i < total_size; ++i) {
+                koopa_raw_value_data * get = get_index(i, pro, res);
+
+                koopa_raw_value_data * st = new koopa_raw_value_data();
+                st->ty                    = simple_koopa_raw_type_kind(KOOPA_RTT_UNIT);
+                st->name                  = nullptr;
+                st->used_by               = empty_koopa_rs(KOOPA_RSIK_VALUE);
+                st->kind.tag              = KOOPA_RVT_STORE;
+                st->kind.data.store.dest  = get;
+                st->kind.data.store.value = init_val->at(i);
+                blocks_list.addInst(st);
+            }
+        }
+        return res;
+    }
+};
+
+class GlobalArrayDefAST : public BaseAST {
+public:
+    std::string                 name;
+    std::unique_ptr<InitValAST> init_val;
+
+    std::vector<std::unique_ptr<ValueBaseAST>> sz_exp;
+
+    void * to_koopa_item() const override {
+        std::vector<int> sz;
+        for (const auto & e : sz_exp)
+            sz.push_back(e->get_value());
+
+        koopa_raw_value_data * res = new koopa_raw_value_data();
+        koopa_raw_type_kind *  ty  = make_array_type(sz);
+        koopa_raw_type_kind *  tty = new koopa_raw_type_kind();
+        tty->tag                   = KOOPA_RTT_POINTER;
+        tty->data.pointer.base     = ty;
+        res->ty                    = tty;
+        res->name                  = make_char_arr("@" + name);
+        res->used_by               = empty_koopa_rs(KOOPA_RSIK_VALUE);
+        res->kind.tag              = KOOPA_RVT_GLOBAL_ALLOC;
+
+        if (init_val) {
+            init_val->is_const = true;
+            init_val->preprocess(sz);
+            res->kind.data.global_alloc.init = init_val->make_aggerate(sz);
+        } else
+            res->kind.data.global_alloc.init = make_zero_init(ty);
+
+        symbol_list.addSymbol(name, LValSymbol(LValSymbol::SymbolType::Array, res));
 
         return res;
     }

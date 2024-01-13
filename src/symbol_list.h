@@ -7,6 +7,8 @@ public:
     enum class SymbolType {
         Const,
         Var,
+        Array,
+        Pointer,
         Function
     } type;
     void * number;
